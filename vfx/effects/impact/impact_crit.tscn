@@ -1,6 +1,0 @@
-[gd_scene format=3 uid="uid://usrmkiurdfsl"]
-
-[ext_resource type="Script" uid="uid://bcok1fnn4kxu0" path="res://vfx/effects/impact/impact_crit.gd" id="1_f7cel"]
-
-[node name="ImpactScript" type="Node2D" unique_id=666529975]
-script = ExtResource("1_f7cel")

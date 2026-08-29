@@ -1,6 +1,0 @@
-[gd_scene format=3 uid="uid://cvnsb45e5untc"]
-
-[ext_resource type="Script" uid="uid://b816lvryb3ech" path="res://vfx/effects/slash/slash_light.gd" id="1_jiuvj"]
-
-[node name="SlashLight" type="Node2D" unique_id=1744027151]
-script = ExtResource("1_jiuvj")
