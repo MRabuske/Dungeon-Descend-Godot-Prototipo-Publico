@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://dv3xnp8bam4e7"]
+
+[ext_resource type="Script" uid="uid://bvj1p1jcd3akm" path="res://ui/event_scene.gd" id="1"]
+
+[node name="EventScene" type="Control" unique_id=740367451]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1")
