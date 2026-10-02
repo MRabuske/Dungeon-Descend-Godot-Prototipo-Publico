@@ -31,8 +31,16 @@ const FONT_NAME      := 12
 const FONT_CLASS     := 10
 const FONT_STAT      := 8
 const FONT_STATUS    := 8
-const STAT_ICON_SIZE := 16
+const CLASS_BADGE_SIZE := 20
 # ──────────────────────────────────────────────────────
+
+# Nome do heroi (em PLAYERS) → sufixo do arquivo de icone em
+# assets/ui/icons/party_select/icon_<sufixo>.png
+const CLASS_ICON_NAMES := {
+	"Guerreiro": "guerreiro", "Mago": "mago", "Arqueiro": "arqueiro",
+	"Clérigo": "clerigo", "Ladrao": "ladrao", "Bárbaro": "barbaro",
+	"Monge": "monge", "Paladino": "paladino",
+}
 
 const HP_COLOR    := Color(0.80, 0.15, 0.18)
 const HP_CRITICAL := Color(0.90, 0.20, 0.20)
@@ -106,53 +114,6 @@ class BarIcon extends Control:
 				c + Vector2(-size.x * 0.46, 0.0),
 			]), PackedColorArray([DIAMOND_COLOR]))
 
-class StatIcon extends Control:
-	enum Kind { AC, INITIATIVE, SPEED, PROFICIENCY, STRENGTH, DEXTERITY, INTELLIGENCE, WISDOM, CONSTITUTION }
-	var kind: int = Kind.AC
-	var custom_texture: Texture2D = null
-	static var icon_cache: Dictionary = {}
-
-	static func get_icon_texture(icon_name: String) -> Texture2D:
-		if icon_cache.has(icon_name):
-			return icon_cache[icon_name]
-		var path := "res://assets/ui/icons/stats/%s.png" % icon_name
-		if ResourceLoader.exists(path):
-			var tex := load(path)
-			icon_cache[icon_name] = tex
-			return tex
-		return null
-
-	const ICON_COLOR := Color(0.75, 0.70, 0.55)
-
-	func _draw() -> void:
-		var c := size / 2.0
-		var h := size.y * 0.46
-		var w := size.x * 0.46
-		if custom_texture:
-			draw_texture_rect(custom_texture, Rect2(Vector2(2, 2), size - Vector2(4, 4)), false, Color.WHITE)
-			return
-		match kind:
-			Kind.AC:
-				var pts := PackedVector2Array([
-					c+Vector2(0,-h), c+Vector2(w,-h*0.3), c+Vector2(w*0.6,h),
-					c+Vector2(-w*0.6,h), c+Vector2(-w,-h*0.3),
-				])
-				draw_polyline(PackedVector2Array([pts[0],pts[1],pts[2],pts[3],pts[4],pts[0]]), ICON_COLOR, 1.5)
-			Kind.INITIATIVE:
-				draw_polyline(PackedVector2Array([
-					c+Vector2(w*0.3,-h), c+Vector2(-w*0.1,0),
-					c+Vector2(w*0.3,0),  c+Vector2(-w*0.3,h),
-				]), ICON_COLOR, 1.5)
-			Kind.SPEED:
-				draw_polyline(PackedVector2Array([c+Vector2(-w,0), c+Vector2(w*0.5,0)]), ICON_COLOR, 1.5)
-				draw_polygon(PackedVector2Array([
-					c+Vector2(w,0), c+Vector2(w*0.45,-h*0.55), c+Vector2(w*0.45,h*0.55),
-				]), PackedColorArray([ICON_COLOR]))
-			Kind.PROFICIENCY:
-				for i in range(4):
-					var angle := i * PI / 2.0 - PI / 4.0
-					draw_line(c, c + Vector2(cos(angle), sin(angle)) * h, ICON_COLOR, 1.5)
-
 class StatusEffectIcon extends Control:
 	enum EffectType { POISON, STUN, BURN, FREEZE, BLESS }
 	var effect_type: int = EffectType.POISON
@@ -208,6 +169,11 @@ class StatusEffectIcon extends Control:
 		queue_redraw()
 
 # ======================================================
+# SIGNALS
+# ======================================================
+signal concentration_cancel_requested(queue_idx: int)
+
+# ======================================================
 # VARS
 # ======================================================
 var _state: BattleState
@@ -215,18 +181,15 @@ var _portrait: Portrait
 var _name_lbl: Label
 var _class_lbl: Label
 var _hp_row: HBoxContainer
-var _mp_row: HBoxContainer
 var _hp_bar: TextureProgressBar
-var _mp_bar: TextureProgressBar
 var _hp_val_lbl: Label
-var _mp_val_lbl: Label
-var _stat_lbls: Array  = []
-var _stat_icons: Array = []
+var _slot_container: VBoxContainer
 var _action_lbl: Label
 var _status_icons_container: HBoxContainer
 var _status_icons: Array = []
 var _status_row: HBoxContainer
-var _stat_name_lbls: Array = []
+var _class_badge: TextureRect
+var _class_badge_bg: Panel
 
 # ======================================================
 # READY
@@ -261,7 +224,6 @@ func _build_panel() -> void:
 	margin.add_child(outer_vbox)
 
 	_build_top_row(outer_vbox)
-	_build_stats_grid(outer_vbox)
 	_build_status_row(outer_vbox)
 
 # ======================================================
@@ -276,6 +238,7 @@ func _build_top_row(parent: Control) -> void:
 	_portrait.custom_minimum_size = Vector2(PORTRAIT_SIZE, PORTRAIT_SIZE)
 	_portrait.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	hbox.add_child(_portrait)
+	_build_class_badge()
 
 	var info_vbox := VBoxContainer.new()
 	info_vbox.add_theme_constant_override("separation", 3)
@@ -292,7 +255,11 @@ func _build_top_row(parent: Control) -> void:
 	info_vbox.add_child(_class_lbl)
 
 	_hp_row = _build_bar_row(true,  info_vbox)
-	_mp_row = _build_bar_row(false, info_vbox)
+
+	# Display de spell slots / Ki (substitui a antiga barra de MP)
+	_slot_container = VBoxContainer.new()
+	_slot_container.add_theme_constant_override("separation", 1)
+	info_vbox.add_child(_slot_container)
 
 	_action_lbl = Label.new()
 	_action_lbl.add_theme_font_size_override("font_size", FONT_STAT)
@@ -341,14 +308,9 @@ func _build_bar_row(is_hp: bool, parent: Control) -> HBoxContainer:
 	bar.max_value             = 1.0
 	bar.value                 = 1.0
 	bar.step                  = 0.001
-	print("bar size =", bar.size)
-	print("bar min =", bar.get_minimum_size())
-	print("bar combined =", bar.get_combined_minimum_size())
-	print("texture width =", HP_BAR_BG.get_width())
 	hbox.add_child(bar)
 
 	if is_hp: _hp_bar = bar
-	else:     _mp_bar = bar
 
 	var val_lbl := Label.new()
 	val_lbl.add_theme_font_size_override("font_size", 7)
@@ -363,61 +325,74 @@ func _build_bar_row(is_hp: bool, parent: Control) -> HBoxContainer:
 	bar.add_child(val_lbl)
 
 	if is_hp: _hp_val_lbl = val_lbl
-	else:     _mp_val_lbl = val_lbl
 
 	return hbox
 
 # ======================================================
-# BUILD — STATS GRID
+# BUILD — SPELL SLOTS / KI DISPLAY
+# Mostra uma linha por nível de slot que o herói possui (●=disponível, ○=gasto)
+# mais uma linha de Ki para o Monge. Non-casters sem Ki não exibem nada.
 # ======================================================
-func _build_stats_grid(parent: Control) -> void:
-	var grid := GridContainer.new()
-	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 12)
-	grid.add_theme_constant_override("v_separation", 4)
-	parent.add_child(grid)
+func _refresh_slot_display(player: Dictionary) -> void:
+	for child in _slot_container.get_children():
+		child.queue_free()
+	var slots: Array     = player.get("spell_slots", [])
+	var slots_max: Array = player.get("spell_slots_max", [])
+	var ki: int     = player.get("ki", 0)
+	var ki_max: int = player.get("ki_max", 0)
+	var has_any := false
+	for i in range(slots_max.size()):
+		if i >= slots.size() or slots_max[i] <= 0:
+			continue
+		has_any = true
+		var lbl := Label.new()
+		lbl.text = "Nv.%d  %s%s" % [
+			i + 1,
+			"●".repeat(slots[i]),
+			"○".repeat(slots_max[i] - slots[i]),
+		]
+		lbl.add_theme_font_size_override("font_size", 11)
+		lbl.add_theme_color_override("font_color", MP_COLOR)
+		_slot_container.add_child(lbl)
+	if ki_max > 0:
+		has_any = true
+		var ki_lbl := Label.new()
+		ki_lbl.text = "Ki  %s%s" % ["●".repeat(ki), "○".repeat(ki_max - ki)]
+		ki_lbl.add_theme_font_size_override("font_size", 11)
+		ki_lbl.add_theme_color_override("font_color", Color(0.95, 0.80, 0.30))
+		_slot_container.add_child(ki_lbl)
+	_slot_container.visible = has_any
 
-	for sk: Dictionary in [
-		{"icon": "ac",           "label": "AC",   "kind": StatIcon.Kind.AC},
-		{"icon": "initiative",   "label": "Init", "kind": StatIcon.Kind.INITIATIVE},
-		{"icon": "speed",        "label": "SPD",  "kind": StatIcon.Kind.SPEED},
-		{"icon": "proficiency",  "label": "Prof", "kind": StatIcon.Kind.PROFICIENCY},
-		{"icon": "strength",     "label": "For",  "kind": StatIcon.Kind.STRENGTH},
-		{"icon": "dextery",      "label": "Des",  "kind": StatIcon.Kind.DEXTERITY},
-		{"icon": "intelligence", "label": "Int",  "kind": StatIcon.Kind.INTELLIGENCE},
-		{"icon": "wisdom",       "label": "Sab",  "kind": StatIcon.Kind.WISDOM},
-		{"icon": "constitution", "label": "Con",  "kind": StatIcon.Kind.CONSTITUTION},
-	]:
-		var item := HBoxContainer.new()
-		item.add_theme_constant_override("separation", 3)
+# ======================================================
+# BUILD — CLASS BADGE
+# Icone de classe sobreposto no canto inferior direito do retrato.
+# ======================================================
+func _build_class_badge() -> void:
+	_class_badge_bg = Panel.new()
+	_class_badge_bg.custom_minimum_size = Vector2(CLASS_BADGE_SIZE, CLASS_BADGE_SIZE)
+	_class_badge_bg.size = Vector2(CLASS_BADGE_SIZE, CLASS_BADGE_SIZE)
+	# Ancora no canto inferior direito do retrato.
+	_class_badge_bg.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_class_badge_bg.position = Vector2(PORTRAIT_SIZE - CLASS_BADGE_SIZE, PORTRAIT_SIZE - CLASS_BADGE_SIZE)
+	_class_badge_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-		var icon := StatIcon.new()
-		icon.kind                = sk["kind"]
-		icon.custom_minimum_size = Vector2(STAT_ICON_SIZE, STAT_ICON_SIZE)
-		icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		var tex := StatIcon.get_icon_texture(sk["icon"])
-		if tex: icon.custom_texture = tex
-		item.add_child(icon)
-		_stat_icons.append(icon)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.0, 0.0, 0.0, 0.6)
+	sb.set_corner_radius_all(CLASS_BADGE_SIZE / 2)
+	_class_badge_bg.add_theme_stylebox_override("panel", sb)
+	_portrait.add_child(_class_badge_bg)
 
-		var name_lbl := Label.new()
-		name_lbl.text = sk["label"] + ":"
-		name_lbl.add_theme_font_size_override("font_size", FONT_STAT)
-		name_lbl.add_theme_color_override("font_color", Color(0.75, 0.75, 0.65))
-		name_lbl.custom_minimum_size.x = 25
-		name_lbl.horizontal_alignment  = HORIZONTAL_ALIGNMENT_LEFT
-		item.add_child(name_lbl)
-		_stat_name_lbls.append(name_lbl)
+	_class_badge = TextureRect.new()
+	_class_badge.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_class_badge.expand_mode      = TextureRect.EXPAND_IGNORE_SIZE
+	_class_badge.stretch_mode     = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_class_badge.mouse_filter     = Control.MOUSE_FILTER_IGNORE
+	_class_badge_bg.add_child(_class_badge)
 
-		var val_lbl := Label.new()
-		val_lbl.add_theme_font_size_override("font_size", FONT_STAT)
-		val_lbl.add_theme_color_override("font_color", Color(0.85, 0.85, 0.70))
-		val_lbl.custom_minimum_size.x = 10
-		val_lbl.horizontal_alignment  = HORIZONTAL_ALIGNMENT_RIGHT
-		item.add_child(val_lbl)
-		_stat_lbls.append(val_lbl)
-
-		grid.add_child(item)
+func _get_class_icon(player_name: String) -> Texture2D:
+	var suffix: String = CLASS_ICON_NAMES.get(player_name, player_name.to_lower())
+	var path := "res://assets/ui/icons/party_select/icon_%s.png" % suffix
+	return load(path) if ResourceLoader.exists(path) else null
 
 # ======================================================
 # BUILD — STATUS ROW
@@ -442,6 +417,12 @@ func refresh(active_index: int) -> void:
 		_show_enemy(combatant, active_index)
 	_refresh_status_badges(queue_idx)
 
+	# Retrato escurece quando o herói está Downed (estilo BG3).
+	if _state != null and _state.is_downed(queue_idx):
+		_portrait.modulate = Color(0.4, 0.4, 0.4, 1.0)
+	else:
+		_portrait.modulate = Color.WHITE
+
 # ======================================================
 # SHOW PLAYER / ENEMY
 # ======================================================
@@ -459,29 +440,15 @@ func _show_player(idx: int) -> void:
 	_hp_bar.modulate = HP_CRITICAL if hp_ratio < 0.25 else Color.WHITE
 	_hp_val_lbl.text = "%d / %d" % [player["hp"], player["max_hp"]]
 
-	var mp_ratio := float(player["mp"]) / float(player["max_mp"]) if player["max_mp"] > 0 else 0.0
-	_mp_bar.value    = mp_ratio
-	_mp_val_lbl.text = "%d / %d" % [player["mp"], player["max_mp"]]
+	_refresh_slot_display(player)
 
 	_hp_row.visible     = true
-	_mp_row.visible     = true
 	_action_lbl.visible = false
 
-	var stat_values := [
-		player["ac"], player["initiative"], player["speed"], player["proficiency"],
-		player["strength"], player["dexterity"], player["intelligence"],
-		player["wisdom"], player["constitution"],
-	]
-	for i in range(_stat_lbls.size()):
-		if i < stat_values.size():
-			_stat_name_lbls[i].visible = true
-			_stat_lbls[i].text     = str(stat_values[i])
-			_stat_lbls[i].visible  = true
-			_stat_icons[i].visible = true
-		else:
-			_stat_lbls[i].text     = ""
-			_stat_lbls[i].visible  = false
-			_stat_icons[i].visible = false
+	# Badge de classe no retrato
+	var class_icon := _get_class_icon(player["name"])
+	_class_badge.texture     = class_icon
+	_class_badge_bg.visible  = class_icon != null
 
 	var combatant_idx := _find_combatant_index_by_name(player["name"])
 	if combatant_idx >= 0:
@@ -502,30 +469,14 @@ func _show_enemy(enemy: Dictionary, idx: int) -> void:
 	_hp_bar.value    = hp_ratio
 	_hp_val_lbl.text = "%d / %d" % [hp, max_hp]
 	_hp_row.visible  = true
-	_mp_row.visible  = false
+	if _slot_container != null:
+		_slot_container.visible = false
 
 	_action_lbl.text    = ""
 	_action_lbl.visible = false
 
-	# Stats do EnemyData: AC, Speed, Attack Bonus
-	# Mapeamento: índice 0=AC, 2=SPD, 3=Prof (usaremos para Attack Bonus)
-	var enemy_stats := [
-		enemy.get("ac", 10),           # índice 0 - AC
-		0,                              # índice 1 - Initiative (não tem)
-		enemy.get("speed", 5),         # índice 2 - SPD
-		enemy.get("attack_bonus", 2),  # índice 3 - Prof (placeholder para Atk)
-	]
-	
-	for i in range(_stat_lbls.size()):
-		if i < enemy_stats.size() and enemy_stats[i] != 0:
-			_stat_lbls[i].text     = str(enemy_stats[i])
-			_stat_lbls[i].visible  = true
-			_stat_icons[i].visible = true
-		else:
-			_stat_name_lbls[i].visible = false 
-			_stat_lbls[i].text     = ""
-			_stat_lbls[i].visible  = false
-			_stat_icons[i].visible = false
+	# Inimigos nao tem badge de classe.
+	_class_badge_bg.visible = false
 
 	_update_status_icons(idx)
 
@@ -539,31 +490,98 @@ func _refresh_status_badges(queue_idx: int) -> void:
 		return
 
 	var status: Dictionary = _state.combatant_statuses[queue_idx]
-	var badge_map := [
-		["defending", "Defender +2 AC", Color(0.3, 0.6, 1.0)],
-		["stun",      "Atordoado",       Color(1.0, 0.9, 0.2)],
-		["stunned",   "Atordoado",       Color(1.0, 0.9, 0.2)],
-		["raging",    "Furia +3 dano",   Color(1.0, 0.3, 0.2)],
-		["aiming",    "Mirando +2 alc",  Color(0.6, 1.0, 0.6)],
-		["furtivo",   "Furtivo",         Color(0.7, 0.4, 1.0)],
-		["fury",      "Fúria",           Color(1.0, 0.2, 0.0)],
-		["smite",     "Smite",           Color(1.0, 0.9, 0.2)],
-	]
-	var seen_stun := false
-	for entry: Array in badge_map:
-		var key: String  = entry[0]
-		var text: String = entry[1]
-		var color: Color = entry[2]
-		if key == "stunned" and seen_stun:
-			continue
-		if key == "stun" and status.get("stun", 0) > 0:
-			seen_stun = true
+	# Badges montados a partir da fonte única StatusDefinitions (sem mapa duplicado).
+	for key: String in StatusDefinitions.ORDER:
 		if status.get(key, 0) > 0:
+			var text: String = StatusDefinitions.name_of(key)
+			if StatusDefinitions.shows_duration(key):
+				text += " (%d)" % int(status[key])
 			var lbl := Label.new()
 			lbl.text = text
 			lbl.add_theme_font_size_override("font_size", FONT_STATUS)
-			lbl.add_theme_color_override("font_color", color)
+			lbl.add_theme_color_override("font_color", StatusDefinitions.color_of(key))
 			_status_row.add_child(lbl)
+
+	# Indicador de Concentração estilo BG3: nome do spell + botão × para cancelar.
+	if _state.is_concentrating(queue_idx):
+		var action: ActionData = _state.get_concentration_action(queue_idx)
+		var spell_full: String = action.label if action else "Concentrando"
+		var spell_short: String = spell_full.left(6)
+
+		var conc_panel := PanelContainer.new()
+		var conc_style := StyleBoxFlat.new()
+		conc_style.bg_color = Color(0.05, 0.05, 0.15, 0.85)
+		conc_style.border_color = Color(0.3, 0.7, 1.0)
+		conc_style.set_border_width_all(2)
+		conc_style.set_corner_radius_all(6)
+		conc_style.content_margin_left = 5
+		conc_style.content_margin_right = 3
+		conc_style.content_margin_top = 1
+		conc_style.content_margin_bottom = 1
+		conc_panel.add_theme_stylebox_override("panel", conc_style)
+		conc_panel.tooltip_text = "%s\nClique em × para cancelar concentração" % spell_full
+
+		var conc_hbox := HBoxContainer.new()
+		conc_hbox.add_theme_constant_override("separation", 3)
+		conc_panel.add_child(conc_hbox)
+
+		var conc_name := Label.new()
+		conc_name.text = "◆ " + spell_short
+		conc_name.add_theme_font_size_override("font_size", FONT_STATUS)
+		conc_name.add_theme_color_override("font_color", Color(0.4, 0.85, 1.0))
+		conc_hbox.add_child(conc_name)
+
+		var conc_cancel := Button.new()
+		conc_cancel.text = "×"
+		conc_cancel.flat = true
+		conc_cancel.focus_mode = Control.FOCUS_NONE
+		conc_cancel.add_theme_font_size_override("font_size", FONT_STATUS)
+		conc_cancel.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
+		conc_cancel.add_theme_color_override("font_hover_color", Color(1.0, 0.7, 0.7))
+		conc_cancel.custom_minimum_size = Vector2(16, 16)
+		conc_cancel.tooltip_text = "Cancelar concentração"
+		conc_cancel.pressed.connect(func() -> void: concentration_cancel_requested.emit(queue_idx))
+		conc_hbox.add_child(conc_cancel)
+
+		_status_row.add_child(conc_panel)
+
+	# Indicador de Downed estilo BG3: rótulo CAÍDO + 3 círculos de sucesso / 3 de falha.
+	if _state.is_downed(queue_idx):
+		var s_cnt: int = status.get("death_saves_success", 0)
+		var f_cnt: int = status.get("death_saves_failure", 0)
+
+		var down_vbox := VBoxContainer.new()
+		down_vbox.add_theme_constant_override("separation", 1)
+
+		var down_lbl := Label.new()
+		down_lbl.text = "CAÍDO"
+		down_lbl.add_theme_font_size_override("font_size", FONT_STATUS)
+		down_lbl.add_theme_color_override("font_color", Color(1.0, 0.5, 0.0))
+		down_vbox.add_child(down_lbl)
+
+		var succ_row := HBoxContainer.new()
+		succ_row.add_theme_constant_override("separation", 3)
+		for j in 3:
+			var dot := Label.new()
+			dot.text = "●" if j < s_cnt else "○"
+			dot.add_theme_font_size_override("font_size", FONT_STATUS + 2)
+			dot.add_theme_color_override("font_color",
+				Color(0.2, 0.9, 0.2) if j < s_cnt else Color(0.35, 0.35, 0.35))
+			succ_row.add_child(dot)
+		down_vbox.add_child(succ_row)
+
+		var fail_row := HBoxContainer.new()
+		fail_row.add_theme_constant_override("separation", 3)
+		for j in 3:
+			var dot := Label.new()
+			dot.text = "●" if j < f_cnt else "○"
+			dot.add_theme_font_size_override("font_size", FONT_STATUS + 2)
+			dot.add_theme_color_override("font_color",
+				Color(0.9, 0.15, 0.15) if j < f_cnt else Color(0.35, 0.35, 0.35))
+			fail_row.add_child(dot)
+		down_vbox.add_child(fail_row)
+
+		_status_row.add_child(down_vbox)
 
 # ======================================================
 # STATUS EFFECT ICONS

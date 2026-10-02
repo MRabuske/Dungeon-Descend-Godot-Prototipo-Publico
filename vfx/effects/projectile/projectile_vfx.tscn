@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cfqnwpgsx76u3"]
+
+[ext_resource type="Script" uid="uid://cbnrvxuox6587" path="res://vfx/effects/projectile/projectile_vfx.gd" id="1_g2wic"]
+
+[node name="ProjectileVfx" type="Node2D" unique_id=2004483642]
+script = ExtResource("1_g2wic")

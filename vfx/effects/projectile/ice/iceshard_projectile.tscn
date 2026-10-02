@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://bxsbjrcvyikbo"]
+
+[ext_resource type="Script" uid="uid://cbnrvxuox6587" path="res://vfx/effects/projectile/projectile_vfx.gd" id="1_bvome"]
+[ext_resource type="SpriteFrames" uid="uid://cbqlh4cyor6cp" path="res://vfx/effects/projectile/ice/iceshard_anim.tres" id="2_a5ffx"]
+
+[node name="IceshardProjectile" type="Node" unique_id=1054330791]
+script = ExtResource("1_bvome")
+sprite_frames = ExtResource("2_a5ffx")

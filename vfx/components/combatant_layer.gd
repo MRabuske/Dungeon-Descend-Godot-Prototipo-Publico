@@ -27,6 +27,8 @@ extends Node2D
 # ======================================================
 
 var battle_area: Control = null  # referência ao BattleArea
+var camera_shake: CameraShake = null
+var screen_flash: ScreenFlash = null
 
 func _ready() -> void:
 	# Combatentes ficam entre o chão e os objetos
@@ -172,6 +174,18 @@ func update_all_combatant_ui(state: BattleState) -> void:
 		if i < state.combatant_statuses.size():
 			node.update_status(state.combatant_statuses[i])
 
+		var conc_action: ActionData = state.get_concentration_action(i)
+		var conc_name: String = conc_action.label if conc_action else ""
+		node.set_concentrating(state.is_concentrating(i), conc_name)
+		node.set_downed(state.is_downed(i))
+		var inv: bool = false
+		var is_prone: bool = false
+		if i < state.combatant_statuses.size():
+			inv = state.combatant_statuses[i].get("invisible", 0) > 0
+			is_prone = state.combatant_statuses[i].get("prone", 0) > 0
+		node.set_invisible(inv)
+		node.set_prone(is_prone)
+
 # ======================================================
 # NOVO: Atualizar HP de um combatente específico
 # ======================================================
@@ -202,10 +216,10 @@ func get_node_at(idx: int) -> CombatantNode:
 	return null
 
 func play_attack_animation(idx: int, target_canvas_pos: Vector2, 
-						   on_impact: Callable, on_done: Callable) -> void:
+						   on_impact: Callable, on_done: Callable, is_ranged: bool = false) -> void:
 	var node := get_node_at(idx)
 	if node:
-		node.play_attack_animation(target_canvas_pos, on_impact, on_done)
+		node.play_attack_animation(target_canvas_pos, on_impact, on_done, is_ranged)
 
 func play_move_animation(idx: int, canvas_path: Array[Vector2],
 						 on_step: Callable, on_done: Callable) -> void:
@@ -218,10 +232,10 @@ func show_hit_flash(idx: int) -> void:
 	if node:
 		node.play_hit_flash(Color.WHITE)
 
-func start_death_animation(idx: int, on_done: Callable) -> void:
+func start_death_animation(idx: int, on_done: Callable, death_dir: Vector2 = Vector2.ZERO) -> void:
 	var node := get_node_at(idx)
 	if node:
-		node.play_death(on_done)
+		node.play_death(on_done, death_dir)
 
 func show_hit_reaction(idx: int, knockback_dir: Vector2 = Vector2.ZERO) -> void:
 	var node := get_node_at(idx)
@@ -256,17 +270,15 @@ func trigger_attack_vfx(target_pos: Vector2, is_crit: bool, slash_dir: float = 0
 	# Efeitos globais
 	_apply_impact_effects(is_crit)
 
-func trigger_impact_vfx(target_pos: Vector2, is_crit: bool) -> void:
+func trigger_impact_vfx(target_pos: Vector2, is_crit: bool, impact_type_override: int = -1) -> void:
 	if not VfxManager:
 		return
 
 	var screen_pos := canvas_to_screen(target_pos)
 
 	# Apenas Impact VFX (ranged)
-	if is_crit:
-		VfxManager.spawn(VFXEvent.Type.IMPACT_CRIT, screen_pos)
-	else:
-		VfxManager.spawn(VFXEvent.Type.IMPACT_LIGHT, screen_pos)
+	var impact_type := impact_type_override if impact_type_override >= 0 else (VFXEvent.Type.IMPACT_CRIT if is_crit else VFXEvent.Type.IMPACT_LIGHT)
+	VfxManager.spawn(impact_type, screen_pos)
 
 	# Efeitos globais
 	_apply_impact_effects(is_crit)
@@ -281,29 +293,23 @@ func trigger_aoe_vfx(target_pos: Vector2, _radius: int) -> void:
 	VfxManager.spawn(VFXEvent.Type.IMPACT_CRIT, screen_pos)
 	
 	# Efeitos globais (mais intensos para AoE)
-	var scene := get_tree().current_scene
-	if scene:
-		for child in scene.get_children():
-			if child is CameraShake:
-				child.add_trauma(0.55)
-			elif child is ScreenFlash:
-				child.flash_white(0.07)
+	if is_instance_valid(camera_shake):
+		camera_shake.add_trauma(0.55)
+	if is_instance_valid(screen_flash):
+		screen_flash.flash_white(0.07)
 	
 	if HitStop:
 		HitStop.trigger_medium()
 
 func _apply_impact_effects(is_crit: bool) -> void:
 	# Camera Shake
-	var scene := get_tree().current_scene
-	if scene:
-		for child in scene.get_children():
-			if child is CameraShake:
-				child.add_trauma(0.60 if is_crit else 0.35)
-			elif child is ScreenFlash:
-				if is_crit:
-					child.flash_white(0.10)
-				else:
-					child.flash_white(0.05)
+	if is_instance_valid(camera_shake):
+		camera_shake.add_trauma(0.60 if is_crit else 0.35)
+	if is_instance_valid(screen_flash):
+		if is_crit:
+			screen_flash.flash_white(0.10)
+		else:
+			screen_flash.flash_white(0.05)
 	
 	# HitStop
 	if HitStop:

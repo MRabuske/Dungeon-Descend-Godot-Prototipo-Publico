@@ -11,7 +11,11 @@ func _init() -> void:
 	targets_allies   = true
 	self_target      = true
 	damage_attribute = DamageAttribute.WIS
-	base_damage_min  = 15
-	base_damage_max  = 25
-	mp_cost          = 20
+	damage_type      = DamageType.HEALING
+	damage_dice_count = 2
+	damage_dice_sides = 8
+	spell_slot_level = 1
 	icon 		= preload("res://assets/ui/icons/skills/cura_maos.png")
+	sfx_cast = "skill_holy"
+	sfx_impact = "silent"
+	impact_type = VFXEvent.Type.SKILL_HEAL

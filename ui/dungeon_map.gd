@@ -21,6 +21,9 @@ const BTN_RED_PRESSED := preload("res://assets/ui/buttons/btn_pressed.png")
 
 const CHAIN_GLOW_TEXTURE := preload("res://assets/ui/map/chains/glow_particle.png")
 
+const FOG_SHADER := preload("res://assets/ui/map/fog_dissolve.gdshader")
+const FOG_NOISE  := preload("res://assets/ui/map/fog_noise.tres")
+
 # Círculos dos nós — por raridade, 3 estados cada (0=normal, 1=hover, 2=selected/pressed)
 const NODE_TEXTURES := {
 	"battle":  [
@@ -56,6 +59,7 @@ const NODE_ICONS := {
 	DungeonState.RoomType.ELITE:   preload("res://assets/ui/map/icons/icon_elite.png"),
 	DungeonState.RoomType.EVENT:   preload("res://assets/ui/map/icons/icon_event.png"),
 	DungeonState.RoomType.MYSTERY: preload("res://assets/ui/map/icons/icon_mystery.png"),
+	DungeonState.RoomType.REST:    preload("res://assets/ui/map/icons/icon_mystery.png"),
 }
 
 # Nó do boss usa uma textura especial maior
@@ -82,6 +86,7 @@ const NODE_TYPE_KEY := {
 	DungeonState.RoomType.BOSS:    "boss",
 	DungeonState.RoomType.EVENT:   "event",
 	DungeonState.RoomType.MYSTERY: "mystery",
+	DungeonState.RoomType.REST:    "mystery",
 }
 
 const NODE_NAMES := {
@@ -90,6 +95,7 @@ const NODE_NAMES := {
 	DungeonState.RoomType.BOSS:    "BOSS",
 	DungeonState.RoomType.EVENT:   "Evento",
 	DungeonState.RoomType.MYSTERY: "Mistério",
+	DungeonState.RoomType.REST:    "Descanso",
 }
 
 const NODE_DESCRIPTIONS := {
@@ -98,29 +104,17 @@ const NODE_DESCRIPTIONS := {
 	DungeonState.RoomType.BOSS:    "O guardião do dungeon. Derrote-o para completar a run.",
 	DungeonState.RoomType.EVENT:   "Uma situação inesperada. Suas escolhas têm consequências.",
 	DungeonState.RoomType.MYSTERY: "Destino incerto. Pode ser uma bênção ou uma armadilha.",
+	DungeonState.RoomType.REST:    "Recupere HP da party antes de seguir.",
 }
 
 # ──────────────────────────────────────────────────────
 # 🔧 AJUSTE DE TAMANHOS
 # ──────────────────────────────────────────────────────
-const NODE_SIZE        := 64.0    # diâmetro do nó em pixels
-const NODE_SIZE_BOSS    := 88.0    # boss é maior
-const NODE_ICON_SIZE    := 30.0    # tamanho do ícone sobre o nó
-const CHAIN_THICKNESS   := 12.0    # espessura visual da corrente
 const PANEL_PATCH       := 32     # nine-patch margin do painel lateral
 const PANEL_TITLE_SIZE  := 16
 const PANEL_FLOOR_SIZE  := 12
 # ──────────────────────────────────────────────────────
-
-# ──────────────────────────────────────────────────────
-# 🔧 AJUSTE Do GLOW
-# ──────────────────────────────────────────────────────
-const CHAIN_GLOW_COLOR := Color(0.55, 0.08, 0.08, 0.9)
-const CHAIN_GLOW_INTENSITY := 1
-const CHAIN_GLOW_PULSE_SPEED := 2.5
-const CHAIN_GLOW_PARTICLE_SIZE := 10
-const CHAIN_GLOW_PARTICLE_SPACING := 10.0
-# ──────────────────────────────────────────────────────
+# Nota: tamanhos de nó/corrente e tuning do glow agora vivem em MapRenderer/MapLayout.
 
 # ======================================================
 # VARS
@@ -131,6 +125,10 @@ var _hovered_node_id: int   = -1
 var _available_ids: Array   = []   # Lista de salas ativas na rodada atual
 var _chain_map: Dictionary  = {}   # "from_id:to_id" -> int (índice da textura)
 var _glow_time: float = 0.0
+var _intro_time: float = 0.0
+var _hover_scale: float = 1.0
+
+var _renderer := MapRenderer.new()
 
 var _canvas: Control
 var _info_name: Label
@@ -142,6 +140,10 @@ var _info_desc: Label
 
 var _party_list_container: VBoxContainer
 var _kb_cursor: int = 0
+
+var _fog_canvas: ColorRect
+var _fog_material: ShaderMaterial
+var _fog_reveal_y: float = 0.0
 
 # ======================================================
 # READY
@@ -165,15 +167,20 @@ func _ready() -> void:
 	_build_layout()
 	_refresh_available()
 	_auto_select_first()
+	# Espera o layout calcular o tamanho do canvas antes de medir a fronteira da névoa.
+	await get_tree().process_frame
+	_start_fog_reveal()
 
 func _process(delta: float) -> void:
 	if _state == null:
 		return
 	
 	_glow_time += delta
-	
-	if not _available_ids.is_empty():
-		_canvas.queue_redraw()
+	_intro_time += delta
+	var target_scale := 1.15 if _hovered_node_id != -1 else 1.0
+	_hover_scale = lerpf(_hover_scale, target_scale, clampf(delta * 12.0, 0.0, 1.0))
+
+	_canvas.queue_redraw()
 
 # ======================================================
 # CHAIN MAP — monta sequência de texturas por conexão
@@ -214,6 +221,23 @@ func _build_background() -> void:
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
+	var amb := CPUParticles2D.new()
+	amb.texture = CHAIN_GLOW_TEXTURE
+	amb.amount = 28
+	amb.lifetime = 6.0
+	amb.preprocess = 3.0
+	amb.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	amb.emission_rect_extents = Vector2(640, 360)
+	amb.position = Vector2(640, 360)
+	amb.direction = Vector2(0, -1)
+	amb.gravity = Vector2(0, -6)
+	amb.initial_velocity_min = 3.0
+	amb.initial_velocity_max = 10.0
+	amb.scale_amount_min = 0.3
+	amb.scale_amount_max = 0.8
+	amb.color = Color(0.5, 0.6, 0.9, 0.10)
+	add_child(amb)
+
 # ======================================================
 # BUILD — LAYOUT PRINCIPAL
 # ======================================================
@@ -230,6 +254,12 @@ func _build_layout() -> void:
 	_build_info_panel()
 	_build_bottom_bar()
 
+	# Ordem de desenho: fundo < mapa < névoa < UI.
+	# A névoa fica logo acima do canvas do mapa; o logo (e os painéis, que já vêm
+	# depois) ficam acima da névoa.
+	move_child(_fog_canvas, _canvas.get_index() + 1)
+	move_child(logo, get_child_count() - 1)
+
 # ======================================================
 # BUILD — CANVAS DO MAPA
 # ======================================================
@@ -239,7 +269,7 @@ func _build_canvas() -> void:
 	_canvas.anchor_right  = 0.70
 	_canvas.anchor_top    = 0.0
 	_canvas.anchor_bottom = 1.0
-	_canvas.offset_top    = 68
+	_canvas.offset_top    = 96
 	_canvas.offset_bottom = -56
 	_canvas.mouse_filter  = Control.MOUSE_FILTER_STOP
 	_canvas.draw.connect(_on_canvas_draw)
@@ -250,6 +280,21 @@ func _build_canvas() -> void:
 			_canvas.queue_redraw()
 	)
 	add_child(_canvas)
+
+	_fog_material = ShaderMaterial.new()
+	_fog_material.shader = FOG_SHADER
+	_fog_material.set_shader_parameter("noise_tex", FOG_NOISE)
+	_fog_material.set_shader_parameter("reveal_y", 0.0)
+
+	# Camada de névoa preta cobrindo a TELA INTEIRA; o shader limpa o topo
+	# (descoberto) e mantém o fundo (não descoberto) coberto. A ordem de desenho
+	# (fundo < mapa < névoa < UI) é garantida no fim de _build_layout.
+	_fog_canvas = ColorRect.new()
+	_fog_canvas.color        = Color.BLACK
+	_fog_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fog_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fog_canvas.material     = _fog_material
+	add_child(_fog_canvas)
 
 # ======================================================
 # BUILD — PAINEL LATERAL
@@ -363,138 +408,75 @@ func _build_bottom_bar() -> void:
 	bar.add_child(hint)
 
 # ======================================================
+# ======================================================
 # CANVAS — DRAW
 # ======================================================
 func _on_canvas_draw() -> void:
 	if _state == null:
 		return
+	_renderer.draw_all(_build_render_ctx())
 
-	_draw_floor_labels()
-	_draw_connections()
-	_draw_nodes()
+func _build_render_ctx() -> Dictionary:
+	return {
+		"canvas": _canvas,
+		"state": _state,
+		"selected_id": _selected_node_id,
+		"hovered_id": _hovered_node_id,
+		"available_ids": _available_ids,
+		"lit": MapLayout.lit_connections(_state),
+		"chain_map": _chain_map,
+		"glow_time": _glow_time,
+		"intro_time": _intro_time,
+		"hover_scale": _hover_scale,
+		"chain_textures": CHAIN_TEXTURES,
+		"chain_glow_texture": CHAIN_GLOW_TEXTURE,
+		"node_textures": NODE_TEXTURES,
+		"boss_node_textures": BOSS_NODE_TEXTURES,
+		"node_icons": NODE_ICONS,
+		"node_type_key": NODE_TYPE_KEY,
+	}
 
-func _draw_floor_labels() -> void:
-	var sz      := _canvas.size
-	var margin  := NODE_SIZE * 0.5 + 8.0
-	var avail_h := sz.y - margin * 2.0
-	var font    := ThemeDB.fallback_font
-	var lbl_col  := Color(0.55, 0.62, 0.80, 0.45)
-	var line_col := Color(0.25, 0.28, 0.40, 0.18)
+# Fração vertical (0..1) descoberta para um dado andar, em coordenadas da TELA
+# (a névoa cobre a tela inteira; o mapa ocupa uma faixa que começa em
+# `_canvas.position.y`). Limpa até a base da faixa daquele andar. Andar -1
+# (nada visto) => topo, tudo encoberto. Boss => libera a tela inteira.
+func _reveal_y_for_floor(floor_idx: int) -> float:
+	if floor_idx < 0:
+		return 0.0
+	var fc: int = _state.floor_count
+	if floor_idx >= fc - 1:
+		return 1.0
+	var screen_h: float = maxf(1.0, _fog_canvas.size.y)
+	var map_top: float = _canvas.position.y
+	var band := MapLayout.floor_band_rect(floor_idx, _canvas.size, fc)
+	return clampf((map_top + band.position.y + band.size.y) / screen_h, 0.0, 1.0)
 
-	for f in range(DungeonState.FLOOR_COUNT):
-		var t := float(f) / float(DungeonState.FLOOR_COUNT - 1)
-		var y := margin + t * avail_h
+func _max_floor_in(ids: Dictionary) -> int:
+	var m := -1
+	for nid in ids.keys():
+		var n: DungeonState.RoomNode = _state.get_node_by_id(nid)
+		if n != null and n.floor_idx > m:
+			m = n.floor_idx
+	return m
 
-		if f > 0:
-			var prev_t := float(f - 1) / float(DungeonState.FLOOR_COUNT - 1)
-			var sep_y  := margin + (prev_t + t) * 0.5 * avail_h
-			_canvas.draw_line(Vector2(0, sep_y), Vector2(sz.x, sep_y), line_col, 1.0)
-
-		var lbl := "Boss" if f == DungeonState.FLOOR_COUNT - 1 else "Andar %d" % (f + 1)
-		_canvas.draw_string(font, Vector2(8.0, y + 5.0), lbl,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, lbl_col)
-
-func _draw_connections() -> void:
-	for node: DungeonState.RoomNode in _state.nodes:
-		var from_pos := _node_center(node)
-		for conn_id: int in node.connections:
-			var target: DungeonState.RoomNode = _state.get_node_by_id(conn_id)
-			if target == null:
-				continue
-			var to_pos := _node_center(target)
-			var key    := "%d:%d" % [mini(node.id, conn_id), maxi(node.id, conn_id)]
-			var segs: Array = _chain_map.get(key, [_CHAIN_MAIN])
-			
-			var should_glow := node.completed and _available_ids.has(target.id)
-			if not should_glow:
-				should_glow = target.completed and _available_ids.has(node.id)
-			
-			_draw_chain(from_pos, to_pos, segs, should_glow)
-
-func _draw_chain(from: Vector2, to: Vector2, seg_indices: Array, apply_glow: bool = false) -> void:
-	var diff   := to - from
-	var length := diff.length()
-	var angle  := diff.angle()
-	if length < 1.0 or seg_indices.is_empty():
+# Anima a névoa recuando da fronteira já vista até a fronteira atual; ao terminar,
+# marca tudo como visto para não reanimar na próxima abertura do mapa.
+func _start_fog_reveal() -> void:
+	var from_y := _reveal_y_for_floor(_max_floor_in(_state.seen_ids))
+	var to_y := _reveal_y_for_floor(_state.max_revealed_floor())
+	if to_y <= from_y:
+		_set_fog_reveal(to_y)
+		_state.acknowledge_revealed()
 		return
+	_set_fog_reveal(from_y)
+	var tw := create_tween()
+	tw.tween_method(_set_fog_reveal, from_y, to_y, 0.6)
+	tw.tween_callback(_state.acknowledge_revealed)
 
-	var seg_len := length / seg_indices.size()
-
-	if apply_glow:
-		var pulse := sin(_glow_time * CHAIN_GLOW_PULSE_SPEED) * 0.5 + 0.5
-		var particle_alpha := CHAIN_GLOW_INTENSITY * (0.4 + pulse * 0.6)
-		var particle_color := Color(
-			CHAIN_GLOW_COLOR.r,
-			CHAIN_GLOW_COLOR.g,
-			CHAIN_GLOW_COLOR.b,
-			particle_alpha
-		)
-		
-		var half_particle := CHAIN_GLOW_PARTICLE_SIZE * 0.5
-		var total_length := seg_len * seg_indices.size()
-		var num_particles := maxi(1, int(total_length / CHAIN_GLOW_PARTICLE_SPACING))
-		var particle_spacing := total_length / num_particles
-		
-		for p_idx in num_particles:
-			var dist := particle_spacing * p_idx
-			var particle_pos := from + diff.normalized() * dist
-			
-			var xform := Transform2D(0.0, particle_pos)
-			_canvas.draw_set_transform_matrix(xform)
-			
-			_canvas.draw_texture_rect(
-				CHAIN_GLOW_TEXTURE,
-				Rect2(-half_particle, -half_particle, CHAIN_GLOW_PARTICLE_SIZE, CHAIN_GLOW_PARTICLE_SIZE),
-				false,
-				particle_color
-			)
-
-	for i in seg_indices.size():
-		var tex: Texture2D = CHAIN_TEXTURES[seg_indices[i]]
-		var origin := from + diff.normalized() * (seg_len * i)
-		var xform  := Transform2D(angle, origin)
-		var rect   := Rect2(0.0, -CHAIN_THICKNESS * 0.5, seg_len, CHAIN_THICKNESS)
-
-		_canvas.draw_set_transform_matrix(xform)
-		_canvas.draw_texture_rect(tex, rect, false)
-
-	_canvas.draw_set_transform_matrix(Transform2D.IDENTITY)
-
-func _draw_nodes() -> void:
-	for node: DungeonState.RoomNode in _state.nodes:
-		var pos     := _node_center(node)
-		var is_boss := node.type == DungeonState.RoomType.BOSS
-		var textures: Array = BOSS_NODE_TEXTURES if is_boss \
-			else NODE_TEXTURES.get(NODE_TYPE_KEY.get(node.type, "battle"), NODE_TEXTURES["battle"])
-		var nsize := NODE_SIZE_BOSS if is_boss else NODE_SIZE
-		var half  := nsize * 0.5
-
-		var tex_idx  := 0  
-		var alpha    := 1.0
-
-		if node.completed:
-			tex_idx = 2    # Força estado permanente de "Pressed" nos já completados
-		elif node.id == _selected_node_id:
-			tex_idx = 2    
-		elif node.id == _hovered_node_id:
-			tex_idx = 1    
-
-		var color := Color(1, 1, 1, alpha)
-
-		_canvas.draw_texture_rect(textures[tex_idx],
-			Rect2(pos - Vector2.ONE * half, Vector2.ONE * nsize),
-			false, color)
-
-		if not is_boss and NODE_ICONS.has(node.type):
-			var icon: Texture2D = NODE_ICONS[node.type]
-			var icon_half := NODE_ICON_SIZE * 0.5
-			_canvas.draw_texture_rect(icon,
-				Rect2(pos - Vector2.ONE * icon_half, Vector2.ONE * NODE_ICON_SIZE),
-				false, color)
-
-		if node.id == _selected_node_id and _available_ids.has(node.id) and not node.completed:
-			_canvas.draw_arc(pos, half + 3.0, 0.0, TAU, 48,
-				Color(0.90, 0.78, 0.20), 3.0)
+func _set_fog_reveal(v: float) -> void:
+	_fog_reveal_y = v
+	if _fog_material:
+		_fog_material.set_shader_parameter("reveal_y", v)
 
 # ======================================================
 # KEYBOARD INPUT
@@ -547,19 +529,10 @@ func _on_canvas_input(event: InputEvent) -> void:
 # NODE — HELPERS
 # ======================================================
 func _node_center(node: DungeonState.RoomNode) -> Vector2:
-	var sz     := _canvas.size
-	var margin := NODE_SIZE * 0.5 + 8.0
-	return Vector2(
-		margin + node.position.x * (sz.x - margin * 2.0),
-		margin + node.position.y * (sz.y - margin * 2.0)
-	)
+	return MapLayout.node_center(node.position, _canvas.size)
 
 func _node_id_at(pos: Vector2) -> int:
-	for node: DungeonState.RoomNode in _state.nodes:
-		var nsize := NODE_SIZE_BOSS if node.type == DungeonState.RoomType.BOSS else NODE_SIZE
-		if pos.distance_to(_node_center(node)) <= nsize * 0.5:
-			return node.id
-	return -1
+	return MapLayout.node_id_at(_state, pos, _canvas.size)
 
 func _select_node(id: int) -> void:
 	_selected_node_id = id
@@ -592,7 +565,7 @@ func _select_node(id: int) -> void:
 		if _enter_btn_label:
 			_enter_btn_label.text = "Entrar"    # Mantém texto, mas bloqueia
 		_enter_btn.disabled = true              # Ativa textura BTN_DISABLED (inativo)
-		
+
 	_canvas.queue_redraw()
 
 func _deselect_node() -> void:
@@ -635,6 +608,15 @@ func _on_enter_room() -> void:
 		return
 		
 	_state.enter_room(_selected_node_id)
+	if node.type == DungeonState.RoomType.REST:
+		DungeonState.apply_rest_heal(BattleState.PLAYERS, 0.30)
+		_state.complete_current_room()
+		_refresh_party_list()
+		_refresh_available()
+		_canvas.queue_redraw()
+		if _info_name:
+			_info_name.text = "Party descansou (+30% HP)"
+		return
 	match node.type:
 		DungeonState.RoomType.EVENT, DungeonState.RoomType.MYSTERY:
 			SceneTransition.fade_to("res://ui/event_scene.tscn")

@@ -25,8 +25,8 @@ func generate(seed_val: int = -1) -> MapData:
 	return _fallback_map()
 
 func _try_generate() -> MapData:
-	var cols: int = randi_range(12, 18)
-	var rows: int = randi_range(8, 11)
+	var cols: int = randi_range(26, 36)
+	var rows: int = randi_range(20, 28)
 
 	# Step 1: fill with NORMAL
 	var tmap: Array = []
@@ -224,17 +224,17 @@ func _pick_cluster(tiles: Array[Vector2i], count: int) -> Array[Vector2i]:
 
 func _fallback_map() -> MapData:
 	var md := MapData.new()
-	md.grid_cols = 12
-	md.grid_rows = 7
+	md.grid_cols = 22
+	md.grid_rows = 18
 	var tile_data_map: Array[Array] = []
-	for col in range(12):
+	for col in range(22):
 		var column: Array[TerrainTile] = []
-		for row in range(7):
+		for row in range(18):
 			var tile := TerrainTile.new()
 			tile.ground = TerrainTile.GroundType.NORMAL
 			column.append(tile)
 		tile_data_map.append(column)
 	md.tile_data_map = tile_data_map
-	md.hero_spawns  = [Vector2i(2,3), Vector2i(1,1), Vector2i(1,5), Vector2i(3,4)]
-	md.enemy_spawns = [Vector2i(9,1), Vector2i(10,3), Vector2i(9,5), Vector2i(11,3)]
+	md.hero_spawns  = [Vector2i(2,9), Vector2i(1,7), Vector2i(1,11), Vector2i(3,9)]
+	md.enemy_spawns = [Vector2i(19,7), Vector2i(20,9), Vector2i(19,11), Vector2i(21,9)]
 	return md

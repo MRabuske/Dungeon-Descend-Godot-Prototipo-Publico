@@ -6,9 +6,11 @@ func _init() -> void:
 	action_type       = Type.ATTACK
 	shape             = SHAPE_SQUARE
 	color_idx         = COLOR_ATTACK
-	attack_range      = 4
+	attack_range      = 8
 	proj_color        = Color(1.0, 0.95, 0.60)
 	damage_attribute  = DamageAttribute.DEX
-	base_damage_min   = 5
-	base_damage_max   = 9
+	damage_type       = DamageType.PHYSICAL
+	is_weapon_attack  = true
 	icon 			  = preload("res://assets/ui/icons/attacks/atq_preciso.png")
+	sfx_cast           = "impact_arrow"
+	sfx_impact         = "whoosh_bow"

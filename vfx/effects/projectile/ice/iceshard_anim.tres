@@ -1,0 +1,53 @@
+[gd_resource type="SpriteFrames" format=3 uid="uid://cbqlh4cyor6cp"]
+
+[ext_resource type="Texture2D" uid="uid://b172fkgqbc34m" path="res://vfx/effects/projectile/ice/iceshard_sheet.png" id="1_1uj5u"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_nfaq8"]
+atlas = ExtResource("1_1uj5u")
+region = Rect2(0, 0, 64, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_6tan8"]
+atlas = ExtResource("1_1uj5u")
+region = Rect2(64, 0, 64, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_2k5mq"]
+atlas = ExtResource("1_1uj5u")
+region = Rect2(128, 0, 64, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_14g43"]
+atlas = ExtResource("1_1uj5u")
+region = Rect2(192, 0, 64, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_pkity"]
+atlas = ExtResource("1_1uj5u")
+region = Rect2(256, 0, 64, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_kti8f"]
+atlas = ExtResource("1_1uj5u")
+region = Rect2(320, 0, 64, 32)
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_nfaq8")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_6tan8")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_2k5mq")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_14g43")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_pkity")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_kti8f")
+}],
+"loop": true,
+"name": &"default",
+"speed": 20.0
+}]

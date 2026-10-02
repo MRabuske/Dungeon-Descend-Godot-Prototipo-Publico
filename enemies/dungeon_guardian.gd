@@ -6,11 +6,24 @@ func _init() -> void:
 	enemy_type   = "DungeonGuardian"
 	sprite       = preload("res://assets/sprites/enemy/dragon/dragon.png")
 	portrait     = preload("res://assets/ui/portraits/enemy/dragon/dragon.png")
+	sprite_frames = preload("res://assets/sprites/enemy/dragon/dragon_animation.tres")
 	sprite_scale = 2.0
 	ac           = 18
 	max_hp       = 180
 	speed        = 3
 	attack_bonus = 9
+	proficiency  = 4
+	crit_threshold = 19
+	damage_dice_count = 1
+	damage_dice_sides = 12
+	attack_damage_attribute = ActionData.DamageAttribute.STR
+	level        = 8
+	strength     = 20
+	dexterity    = 10
+	constitution = 20
+	intelligence = 12
+	wisdom       = 14
+	charisma     = 10
 	action_pool = [
 		"Guardian Smash on %s...",
 		"Guardian Smash on %s...",

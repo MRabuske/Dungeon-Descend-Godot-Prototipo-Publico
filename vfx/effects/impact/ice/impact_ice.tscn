@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://c3urkschnmt7a"]
+
+[ext_resource type="Script" uid="uid://cbnrvxuox6587" path="res://vfx/effects/projectile/projectile_vfx.gd" id="1_2yw65"]
+[ext_resource type="SpriteFrames" uid="uid://dcr5ivpkrv1m0" path="res://vfx/effects/impact/ice/impact_ice.tres" id="2_5s35i"]
+
+[node name="ImpactIce" type="Node2D" unique_id=231740053]
+script = ExtResource("1_2yw65")
+sprite_frames = ExtResource("2_5s35i")
+metadata/_custom_type_script = "uid://bcok1fnn4kxu0"

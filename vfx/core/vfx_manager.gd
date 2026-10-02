@@ -15,9 +15,13 @@ const POOL_PREALLOC := 3
 # Para adicionar asset real: crie a .tscn e registre aqui.
 # ──────────────────────────────────────────────────────
 const EFFECT_SCENES: Dictionary = {
-	VFXEvent.Type.SLASH_LIGHT:  preload("res://vfx/effects/slash/slash_light.tscn"),
-	VFXEvent.Type.IMPACT_LIGHT: preload("res://vfx/effects/impact/impact_light.tscn"),
-	VFXEvent.Type.IMPACT_CRIT:  preload("res://vfx/effects/impact/impact_crit.tscn"),
+	VFXEvent.Type.SLASH_LIGHT:  			preload("res://vfx/effects/slash/slash_light.tscn"),
+	VFXEvent.Type.IMPACT_LIGHT: 			preload("res://vfx/effects/impact/impact_light.tscn"),
+	VFXEvent.Type.IMPACT_CRIT:  			preload("res://vfx/effects/impact/impact_crit.tscn"),
+	VFXEvent.Type.SKILL_FIRE:   			preload("res://vfx/effects/impact/fire/impact_fire.tscn"),
+	VFXEvent.Type.SKILL_ICE:   				preload("res://vfx/effects/impact/ice/impact_ice.tscn"),
+	VFXEvent.Type.SKILL_LIGHTNING:   		preload("res://vfx/effects/impact/lightning/impact_lightning.tscn"),
+	VFXEvent.Type.SKILL_HEAL:   			preload("res://vfx/effects/impact/heal/impact_heal.tscn"),
 }
 
 var _pools:      Dictionary = {}

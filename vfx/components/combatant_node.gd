@@ -50,6 +50,7 @@ const HIT_FLASH_SHADER := preload("res://vfx/shaders/hit_flash.gdshader")
 const OUTLINE_SHADER   := preload("res://vfx/shaders/outline.gdshader")
 const DISSOLVE_SHADER  := preload("res://vfx/shaders/dissolve.gdshader")
 const NOISE_TEXTURE    := preload("res://vfx/textures/noise_dissolve.png")
+const BURN_SHADER      := preload("res://vfx/shaders/burn.gdshader")
 
 # ======================================================
 # NÓS FILHOS
@@ -65,6 +66,8 @@ var _hp_bar_bg: ColorRect = null
 var _hp_bar_fill: ColorRect = null
 var _status_container: Node2D = null
 var _status_icons: Array[ColorRect] = []
+var _concentration_icon: Label = null
+var _prone_icon: Label = null
 
 # ======================================================
 # ESTADO
@@ -78,6 +81,10 @@ var _hit_mat:     ShaderMaterial = null
 var _outline_mat: ShaderMaterial = null
 var _dissolve_mat:ShaderMaterial = null
 var _active_mat:  String         = ""   # "hit"|"outline"|"dissolve"|""
+var _burn_mat: ShaderMaterial = null
+var _combatant_frames: SpriteFrames = null
+var _anim_sprite: AnimatedSprite2D = null
+var _current_direction: String = "down_right"
 
 # ======================================================
 # SETUP
@@ -100,16 +107,18 @@ func setup(idx: int, combatant: Dictionary, texture: Texture2D) -> void:
 	sprite.texture_filter  = CanvasItem.TEXTURE_FILTER_NEAREST
 	var data_scale: float = combatant.get("sprite_scale", 1.0)
 	if texture:
-		var texture_size := texture.get_size()
+		var texture_size := texture.get_size() # Aqui será 86x90
+		
 		var scale_x := (SPRITE_SIZE.x / texture_size.x) * data_scale
 		var scale_y := (SPRITE_SIZE.y / texture_size.y) * data_scale
 		sprite.scale = Vector2(scale_x, scale_y)
-		if data_scale != 1.0:
-			var scaled_width  := SPRITE_SIZE.x * data_scale
-			var scaled_height := SPRITE_SIZE.y * data_scale
-			sprite.offset = Vector2(-(scaled_width / 2.0) + 18.0, -(scaled_height) + 58)
-		else:
-			sprite.offset = SPRITE_OFFSET
+		
+		var base_offset_x := -(texture_size.x / 2.0)
+		var base_offset_y := -texture_size.y
+		
+		var vfx_padding_x := 4.0
+		var vfx_padding_y := 16.0
+		sprite.offset = Vector2(base_offset_x + vfx_padding_x, base_offset_y + vfx_padding_y)
 	add_child(sprite)
 
 	_ui_layer = Node2D.new()
@@ -117,8 +126,9 @@ func setup(idx: int, combatant: Dictionary, texture: Texture2D) -> void:
 	_ui_layer.z_index = 100
 	add_child(_ui_layer)
 	
-	_create_hp_bar()
 	_create_status_container()
+	_create_concentration_icon()
+	_create_prone_icon()
 
 	# Pré-cria ShaderMaterials — nunca aloca em runtime
 	_hit_mat              = ShaderMaterial.new()
@@ -133,6 +143,21 @@ func setup(idx: int, combatant: Dictionary, texture: Texture2D) -> void:
 	_dissolve_mat.set_shader_parameter("noise_texture", NOISE_TEXTURE)
 
 	sprite.material = null
+
+	_init_burn_material()
+	
+	_combatant_frames = combatant.get("sprite_frames", null)
+	print("Combatant: ", combatant.get("name", "?"), " | sprite_frames: ", _combatant_frames != null)
+	
+	if _combatant_frames:
+		_anim_sprite = AnimatedSprite2D.new()
+		_anim_sprite.centered = false
+		_anim_sprite.offset = sprite.offset
+		_anim_sprite.scale = sprite.scale
+		_anim_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		_anim_sprite.sprite_frames = _combatant_frames
+		_anim_sprite.visible = false
+		add_child(_anim_sprite)
 
 # ======================================================
 # UPDATE — posição a cada frame (chamado pelo BattleArea)
@@ -178,36 +203,85 @@ func set_outline(active: bool, color: Color = Color(1.0, 0.85, 0.0)) -> void:
 # ======================================================
 # EFEITO — dissolve na morte
 # ======================================================
-func play_death(on_done: Callable = Callable()) -> void:
-	# Mata tweens anteriores que possam chamar _clear_mat
+func play_death(on_done: Callable = Callable(), death_dir: Vector2 = Vector2.ZERO) -> void:
 	var tw_kill := create_tween()
 	tw_kill.kill()
-	
 	_clear_mat()
+	
+	var dir_name := _current_direction
+	if death_dir != Vector2.ZERO:
+		dir_name = _get_direction(death_dir)
+	
+	var anim_name := "death_" + dir_name
+	var has_death_anim := _anim_sprite and _combatant_frames and _combatant_frames.has_animation(anim_name)
+	
+	# ── Sempre aplica o dissolve shader ──
 	_set_mat(_dissolve_mat)
 	_dissolve_mat.set_shader_parameter("dissolve_amount", 0.0)
 	_dissolve_mat.set_shader_parameter("edge_color", Color(1.0, 0.35, 0.08))
 	_dissolve_mat.set_shader_parameter("edge_width", 0.08)
-
+	
+	var duration := DISSOLVE_DURATION
+	
+	# ── Se tem animação de morte, toca junto ──
+	if has_death_anim:
+		sprite.visible = false
+		_anim_sprite.visible = true
+		_anim_sprite.play(anim_name)
+		var fps := _combatant_frames.get_animation_speed(anim_name)
+		var frame_count := _combatant_frames.get_frame_count(anim_name)
+		duration = float(frame_count) / fps if fps > 0 else DISSOLVE_DURATION
+	
+	# ── Tween do dissolve ──
 	var tw := create_tween()
 	tw.tween_method(
-		func(v: float): _dissolve_mat.set_shader_parameter("dissolve_amount", v),
-		0.0, 1.0, DISSOLVE_DURATION
+		func(v: float): 
+			if is_instance_valid(self) and is_inside_tree():
+				_dissolve_mat.set_shader_parameter("dissolve_amount", v),
+		0.0, 1.0, duration
 	).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	tw.tween_callback(func():
-		visible = false
+		if is_instance_valid(self) and is_inside_tree():
+			visible = false
 		if on_done.is_valid():
 			on_done.call()
 	)
+
 # ======================================================
 # ANIMAÇÃO — ataque (anticipation + lunge + recovery)
 # FIX: usa position relativa ao nó — não mexe em _visual_positions
 # O canvas position é restaurado no callback de done.
 # ======================================================
 func play_attack_animation(target_canvas_pos: Vector2,
-		on_impact: Callable, on_done: Callable) -> void:
+		on_impact: Callable, on_done: Callable, is_ranged: bool = false) -> void:
 	var origin := position
 	var dir    := (target_canvas_pos - origin).normalized()
+	_current_direction = _get_direction(dir)
+	
+	var anim_prefix := "ranged_" if is_ranged else "attack_"
+	var anim_name := anim_prefix + _current_direction
+	print("Tentando ataque: ", anim_name, " | is_ranged: ", is_ranged, " | _anim_sprite: ", _anim_sprite != null, " | Existe? ", _combatant_frames.has_animation(anim_name) if _combatant_frames else false)
+	
+	if _anim_sprite and _combatant_frames and _combatant_frames.has_animation(anim_name):
+		sprite.visible = false
+		_anim_sprite.visible = true
+		_anim_sprite.play(anim_name)
+		var fps := _combatant_frames.get_animation_speed(anim_name)
+		var frame_count := _combatant_frames.get_frame_count(anim_name)
+		var duration := float(frame_count) / fps if fps > 0 else 0.5
+		var impact_timer := get_tree().create_timer(duration * 0.5)
+		await impact_timer.timeout
+		if is_instance_valid(self) and is_inside_tree():
+			on_impact.call()
+		var end_timer := get_tree().create_timer(duration * 0.5)
+		await end_timer.timeout
+		if is_instance_valid(self) and is_inside_tree():
+			set_idle()
+			if on_done.is_valid():
+				on_done.call()
+		return
+	else: 
+		print("Fallback: squash/stretch")
 
 	var base_scale := sprite.scale
 
@@ -258,13 +332,23 @@ func play_move_animation(canvas_path: Array[Vector2], on_step: Callable, on_done
 	var tw := create_tween()
 	for i in range(canvas_path.size()):
 		var dest: Vector2 = canvas_path[i]
+		var dir := (dest - position).normalized()
+		_current_direction = _get_direction(dir)
+		var walk_anim := "walk_" + _current_direction
+		if _anim_sprite and _combatant_frames and _combatant_frames.has_animation(walk_anim):
+			sprite.visible = false
+			_anim_sprite.visible = true
+			_anim_sprite.play(walk_anim)
 		tw.tween_property(self, "position", dest, 0.14) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 		# Chama on_step ao chegar em cada tile
 		tw.tween_callback(on_step.bind(i))
 
 	tw.tween_callback(func():
+		set_idle()
 		trail.stop()
+		if SfxManager:
+			SfxManager.stop_all()
 		await get_tree().create_timer(trail.fade_out_sec + 0.01).timeout
 		trail.visible = false
 		on_done.call()
@@ -293,46 +377,169 @@ func play_hit_reaction(knockback_dir: Vector2 = Vector2.ZERO) -> void:
 		.set_trans(Tween.TRANS_SINE)
 
 # ======================================================
+# ANIMAÇÃO —  Burn
+# ======================================================
+func play_burn(duration: float = 2.0, on_done: Callable = Callable()) -> void:
+	_set_mat(_burn_mat)
+	_burn_mat.set_shader_parameter("edge_color", Color(1.0, 0.0, 0.0))
+	_burn_mat.set_shader_parameter("edge_width", 0.04)
+	_burn_mat.set_shader_parameter("burn_amount", 0.0)
+	_burn_mat.set_shader_parameter("time", 0.0)
+	
+	var time_tween := create_tween()
+	time_tween.tween_method(
+		func(v: float):
+			if is_instance_valid(self) and is_inside_tree():
+				_burn_mat.set_shader_parameter("time", v),
+		0.0, duration, duration
+	)
+	
+	var tw := create_tween()
+	tw.tween_method(
+		func(v: float):
+			if is_instance_valid(self) and is_inside_tree():
+				_burn_mat.set_shader_parameter("burn_amount", v),
+		0.0, 0.8, duration * 0.2
+	).set_trans(Tween.TRANS_SINE)
+	tw.tween_method(
+		func(v: float):
+			if is_instance_valid(self) and is_inside_tree():
+				_burn_mat.set_shader_parameter("burn_amount", v),
+		0.8, 0.0, duration * 0.8
+	).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tw.tween_callback(func():
+		if is_instance_valid(self) and is_inside_tree():
+			if _active_mat == "burn":
+				_clear_mat()
+		if on_done.is_valid():
+			on_done.call()
+	)
+# ======================================================
 # HELPERS
 # ======================================================
 func _set_mat(mat: ShaderMaterial) -> void:
 	if sprite:
 		sprite.material = mat
-		_active_mat     = mat.shader.resource_path.get_file().get_basename()
+
+	if _anim_sprite:
+		_anim_sprite.material = mat
+
+	_active_mat = mat.shader.resource_path.get_file().get_basename()
 
 func _clear_mat() -> void:
 	if sprite:
 		sprite.material = null
-		_active_mat     = ""
+
+	if _anim_sprite:
+		_anim_sprite.material = null
+
+	_active_mat = ""
 
 # ══════════════════════════════════════════════════════
 # NOVO: Criação da barra de HP
 # ══════════════════════════════════════════════════════
 func _create_hp_bar() -> void:
-	# Fundo da barra
+	var data_scale: float = 1.0
+	if sprite and sprite.texture:
+		data_scale = sprite.scale.x / (SPRITE_SIZE.x / sprite.texture.get_size().x)
+
+	# Posição Vertical: sobe ou desce baseada na escala do personagem
+	var current_offset_y := HP_BAR_OFFSET_Y * data_scale
+
+	# Posição Horizontal: Compensação do centro do sprite
+	var vfx_padding_x := 4.0 
+	var current_offset_x := (-HP_BAR_WIDTH / 2.0) + (vfx_padding_x * data_scale)
+
 	_hp_bar_bg = ColorRect.new()
 	_hp_bar_bg.size = Vector2(HP_BAR_WIDTH, HP_BAR_HEIGHT)
 	_hp_bar_bg.color = HP_BAR_BG_COLOR
-	_hp_bar_bg.position = Vector2(
-		-HP_BAR_WIDTH / 2.0 + 8.0,  # centraliza (ajuste fino)
-		HP_BAR_OFFSET_Y
-	)
+	_hp_bar_bg.position = Vector2(current_offset_x, current_offset_y)
 	_ui_layer.add_child(_hp_bar_bg)
 	
-	# Preenchimento da barra
 	_hp_bar_fill = ColorRect.new()
 	_hp_bar_fill.size = Vector2(HP_BAR_WIDTH, HP_BAR_HEIGHT)
-	_hp_bar_fill.color = _get_hp_color(1.0)  # começa cheia
+	_hp_bar_fill.color = _get_hp_color(1.0)
 	_hp_bar_fill.position = _hp_bar_bg.position
-	_ui_layer.add_child(_hp_bar_fill) 
-
+	_ui_layer.add_child(_hp_bar_fill)
 # ══════════════════════════════════════════════════════
 # NOVO: Cria container para ícones de status
 # ══════════════════════════════════════════════════════
 func _create_status_container() -> void:
+	var data_scale: float = 1.0
+	if sprite and sprite.texture:
+		data_scale = sprite.scale.x / (SPRITE_SIZE.x / sprite.texture.get_size().x)
 	_status_container = Node2D.new()
-	_status_container.position = Vector2(0, STATUS_OFFSET_Y)
+	_status_container.position = Vector2(0, STATUS_OFFSET_Y * data_scale)
 	_ui_layer.add_child(_status_container)
+
+# ══════════════════════════════════════════════════════
+# NOVO: Ícone de concentração (◆) — visível enquanto o caster concentra
+# ══════════════════════════════════════════════════════
+func _create_concentration_icon() -> void:
+	_concentration_icon = Label.new()
+	_concentration_icon.text = "◆"
+	_concentration_icon.add_theme_font_size_override("font_size", 12)
+	_concentration_icon.add_theme_color_override("font_color", Color(0.65, 0.20, 0.95))
+	_concentration_icon.position = Vector2(10, STATUS_OFFSET_Y - 8)
+	_concentration_icon.visible = false
+	_ui_layer.add_child(_concentration_icon)
+
+func set_concentrating(value: bool, spell_name: String = "") -> void:
+	if _concentration_icon:
+		_concentration_icon.visible = value
+		if value and spell_name != "":
+			_concentration_icon.text = "◆ " + spell_name.left(4)
+		elif not value:
+			_concentration_icon.text = "◆"
+
+# ══════════════════════════════════════════════════════
+# Indicador TEMPORÁRIO de Prone (sem animação/sprite ainda) — tag de texto
+# acima do token para saber, em teste, quem está Prostrado.
+# ══════════════════════════════════════════════════════
+func _create_prone_icon() -> void:
+	_prone_icon = Label.new()
+	_prone_icon.text = "⤓ PRONE"
+	_prone_icon.add_theme_font_size_override("font_size", 11)
+	_prone_icon.add_theme_color_override("font_color", Color(1.0, 0.75, 0.2))
+	_prone_icon.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_prone_icon.add_theme_constant_override("outline_size", 3)
+	_prone_icon.position = Vector2(-12, STATUS_OFFSET_Y - 22)
+	_prone_icon.visible = false
+	_ui_layer.add_child(_prone_icon)
+
+func set_prone(value: bool) -> void:
+	if _prone_icon:
+		_prone_icon.visible = value
+
+# ══════════════════════════════════════════════════════
+# NOVO: Estado Downed (caído) — sprite cinza e deitado
+# Downed e Invisible compõem o mesmo modulate via _apply_visual_state().
+# ══════════════════════════════════════════════════════
+var _is_downed_state: bool = false
+var _is_invisible_state: bool = false
+
+func set_downed(value: bool) -> void:
+	_is_downed_state = value
+	_apply_visual_state()
+
+func set_invisible(value: bool) -> void:
+	_is_invisible_state = value
+	_apply_visual_state()
+
+func _apply_visual_state() -> void:
+	if sprite == null:
+		return
+	var col := Color.WHITE
+	if _is_downed_state:
+		col = Color(0.35, 0.35, 0.35, 0.85)
+	if _is_invisible_state:
+		col.a = 0.35   # Invisível: bem translúcido (compõe com Downed)
+	var rot := 90.0 if _is_downed_state else 0.0
+	sprite.modulate = col
+	sprite.rotation_degrees = rot
+	if _anim_sprite:
+		_anim_sprite.modulate = col
+		_anim_sprite.rotation_degrees = rot
 
 # ══════════════════════════════════════════════════════
 # NOVO: Atualiza HP bar
@@ -341,7 +548,7 @@ func update_hp(current_hp: int, max_hp: int) -> void:
 	_current_hp = current_hp
 	_max_hp = max_hp
 	
-	if not _hp_bar_fill:
+	if not _hp_bar_fill or not _hp_bar_bg:
 		return
 	
 	var ratio := float(current_hp) / float(max_hp) if max_hp > 0 else 0.0
@@ -352,49 +559,9 @@ func update_hp(current_hp: int, max_hp: int) -> void:
 # NOVO: Atualiza ícones de status
 # ══════════════════════════════════════════════════════
 func update_status(status_dict: Dictionary) -> void:
-	# Limpa ícones anteriores
 	for icon in _status_icons:
 		icon.queue_free()
 	_status_icons.clear()
-	
-	# Coleta cores dos status ativos
-	var active_colors: Array[Color] = []
-	
-	if status_dict.get("poison", 0) > 0:
-		active_colors.append(STATUS_POISON_COLOR)
-	if status_dict.get("stun", 0) > 0:
-		active_colors.append(STATUS_STUN_COLOR)
-	# Adicione mais status aqui conforme necessário
-	
-	if active_colors.is_empty():
-		return
-	
-	# Calcula posições dos ícones
-	var total_width := active_colors.size() * (STATUS_BG_RADIUS * 2.0 + STATUS_ICON_GAP) - STATUS_ICON_GAP
-	var start_x := -total_width / 2.0 + STATUS_BG_RADIUS
-	
-	for i in range(active_colors.size()):
-		# Círculo de fundo
-		var bg := ColorRect.new()
-		bg.size = Vector2(STATUS_BG_RADIUS * 2, STATUS_BG_RADIUS * 2)
-		bg.position = Vector2(
-			start_x + i * (STATUS_BG_RADIUS * 2.0 + STATUS_ICON_GAP) - STATUS_BG_RADIUS,
-			-STATUS_BG_RADIUS
-		)
-		bg.color = STATUS_BG_COLOR
-		_status_container.add_child(bg)
-		_status_icons.append(bg)
-		
-		# Círculo colorido (ícone)
-		var icon := ColorRect.new()
-		icon.size = Vector2(STATUS_ICON_RADIUS * 2, STATUS_ICON_RADIUS * 2)
-		icon.position = Vector2(
-			start_x + i * (STATUS_BG_RADIUS * 2.0 + STATUS_ICON_GAP) - STATUS_ICON_RADIUS,
-			-STATUS_ICON_RADIUS
-		)
-		icon.color = active_colors[i]
-		_status_container.add_child(icon)
-		_status_icons.append(icon)
 
 # ══════════════════════════════════════════════════════
 # NOVO: Helper para cor da HP bar
@@ -411,3 +578,33 @@ func _get_hp_color(ratio: float) -> Color:
 func set_ui_visible(visible_state: bool) -> void:
 	if _ui_layer:
 		_ui_layer.visible = visible_state
+
+func _init_burn_material() -> void:
+	_burn_mat = ShaderMaterial.new()
+	_burn_mat.shader = BURN_SHADER
+	_burn_mat.set_shader_parameter("noise_texture", NOISE_TEXTURE)
+
+func set_idle() -> void:
+	if not _anim_sprite:
+		return
+	_anim_sprite.visible = false
+	_anim_sprite.stop()
+	sprite.visible = true
+
+func _get_direction(screen_vec: Vector2) -> String:
+	if screen_vec == Vector2.ZERO:
+		return _current_direction
+	const HW := 36.0
+	const HH := 18.0
+	var grid_x := (screen_vec.x / HW + screen_vec.y / HH) / 2.0
+	var grid_y := (screen_vec.y / HH - screen_vec.x / HW) / 2.0
+	if abs(grid_x) > abs(grid_y):
+		if grid_x > 0:
+			return "down_right"
+		else:
+			return "up_left"
+	else:
+		if grid_y > 0:
+			return "down_left"
+		else:
+			return "up_right"

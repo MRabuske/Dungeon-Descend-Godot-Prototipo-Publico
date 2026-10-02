@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://c2ahx17bt1pnc"]
+
+[ext_resource type="Script" uid="uid://cbnrvxuox6587" path="res://vfx/effects/projectile/projectile_vfx.gd" id="1_qey0t"]
+[ext_resource type="SpriteFrames" uid="uid://ba73wedgjk5dd" path="res://vfx/effects/impact/heal/impact_heal.tres" id="2_2wn1b"]
+
+[node name="ImpactHeal" type="Node2D" unique_id=860387662]
+script = ExtResource("1_qey0t")
+sprite_frames = ExtResource("2_2wn1b")
+metadata/_custom_type_script = "uid://bcok1fnn4kxu0"

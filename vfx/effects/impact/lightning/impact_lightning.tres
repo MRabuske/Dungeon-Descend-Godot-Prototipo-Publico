@@ -1,0 +1,60 @@
+[gd_resource type="SpriteFrames" format=3 uid="uid://du5aepiyiy6uf"]
+
+[ext_resource type="Texture2D" uid="uid://e717d682yaaw" path="res://vfx/effects/impact/lightning/impact_lightning_sheet.png" id="1_y75c5"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_yyq4q"]
+atlas = ExtResource("1_y75c5")
+region = Rect2(0, 0, 64, 72)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_1qedm"]
+atlas = ExtResource("1_y75c5")
+region = Rect2(64, 0, 64, 72)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_gf1sr"]
+atlas = ExtResource("1_y75c5")
+region = Rect2(128, 0, 64, 72)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_1ok7g"]
+atlas = ExtResource("1_y75c5")
+region = Rect2(192, 0, 64, 72)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ayio7"]
+atlas = ExtResource("1_y75c5")
+region = Rect2(256, 0, 64, 72)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_5q5hf"]
+atlas = ExtResource("1_y75c5")
+region = Rect2(320, 0, 64, 72)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_daekp"]
+atlas = ExtResource("1_y75c5")
+region = Rect2(384, 0, 64, 72)
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_yyq4q")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_1qedm")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_gf1sr")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_1ok7g")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ayio7")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_5q5hf")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_daekp")
+}],
+"loop": true,
+"name": &"default",
+"speed": 12.0
+}]
