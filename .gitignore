@@ -5,3 +5,5 @@
 docs/
 .claude/
 refs/
+# Pasta local de prompts — NUNCA commitar (mantida só localmente)
+prompts/

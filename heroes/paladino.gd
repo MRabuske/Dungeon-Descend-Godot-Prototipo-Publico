@@ -6,11 +6,11 @@ func _init() -> void:
 	hero_class   = "Paladin"
 	sprite       = preload("res://assets/sprites/hero/paladino/paladino.png")
 	portrait     = preload("res://assets/ui/portraits/hero/paladino/paladino.png")
+	sprite_frames = preload("res://assets/sprites/hero/paladino/paladino_animation.tres")
 	level        = 4
 	base_hp      = 80
 	max_hp       = 110
-	base_mp      = 40
-	max_mp       = 60
+	caster_type  = CasterType.HALF
 	ac           = 16
 	initiative   = 6
 	speed        = 6
@@ -20,6 +20,10 @@ func _init() -> void:
 	intelligence = 8
 	wisdom       = 14
 	constitution = 15
+	charisma     = 16
+	save_proficiencies = ["WIS", "CHA"]
 	damage_reduction = 0
+	weapon = HeroData.make_weapon("Longsword", 1, 8, ActionData.DamageAttribute.STR, false, 10)
 	actions = [AtqDivino.new(), AcaoMover.new()]
 	skills  = [SkillSmite.new(), SkillCuraMaos.new()]
+	reactions = [ReactionDivineSmite.new()]

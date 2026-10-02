@@ -20,7 +20,8 @@ const FADE_DELAY        := 0.35    # seg antes de começar o fade
 const COLOR_HEAL        := Color(0.30, 1.00, 0.45)
 const COLOR_CRIT        := Color(1.00, 0.85, 0.10)
 const COLOR_NORMAL      := Color(1.00, 0.30, 0.20)
-const COLOR_MISS        := Color(0.70, 0.70, 0.70)
+const COLOR_MISS        := Color(0.75, 0.75, 0.75)
+const COLOR_CRIT_MISS   := Color(0.95, 0.20, 0.20)
 # ──────────────────────────────────────────────────────
 
 var _parent: Control = null   # nó pai para adicionar labels
@@ -35,30 +36,36 @@ func setup(parent_control: Control) -> void:
 # PUBLIC
 # ======================================================
 func spawn(world_pos: Vector2, amount: int,
-		is_heal: bool, is_crit: bool = false, is_miss: bool = false) -> void:
+		is_heal: bool, is_crit: bool = false, is_miss: bool = false,
+		color_override: Color = Color(-1, -1, -1)) -> void:
 
-	var lbl := Label.new()
 	var color: Color
 	var text: String
+	var font_size := FONT_SIZE_NORMAL
 
 	if is_miss:
-		text  = "MISS"
+		text  = "Miss!"
 		color = COLOR_MISS
-		lbl.add_theme_font_size_override("font_size", FONT_SIZE_NORMAL)
 	elif is_heal:
 		text  = "+" + str(amount)
 		color = COLOR_HEAL
-		lbl.add_theme_font_size_override("font_size", FONT_SIZE_NORMAL)
 	elif is_crit:
 		text  = "CRIT! -" + str(amount)
-		color = COLOR_CRIT
-		lbl.add_theme_font_size_override("font_size", FONT_SIZE_CRIT)
+		color = color_override if color_override.r >= 0.0 else COLOR_CRIT
+		font_size = FONT_SIZE_CRIT
 	else:
 		text  = "-" + str(amount)
-		color = COLOR_NORMAL
-		lbl.add_theme_font_size_override("font_size", FONT_SIZE_NORMAL)
+		color = color_override if color_override.r >= 0.0 else COLOR_NORMAL
 
+	spawn_text(world_pos, text, color, font_size, is_crit)
+
+# Generic text floater (used for damage/heal numbers and for miss indicators).
+func spawn_text(world_pos: Vector2, text: String, color: Color,
+		font_size: int = FONT_SIZE_NORMAL, big_scale: bool = false) -> void:
+
+	var lbl := Label.new()
 	lbl.text = text
+	lbl.add_theme_font_size_override("font_size", font_size)
 	lbl.add_theme_color_override("font_color", color)
 	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
 	lbl.add_theme_constant_override("outline_size", 3)
@@ -70,8 +77,7 @@ func spawn(world_pos: Vector2, amount: int,
 	root.add_child(lbl)
 	lbl.global_position = world_pos - Vector2(0, 20)
 
-	# Escala inicial em crits
-	if is_crit:
+	if big_scale:
 		lbl.scale = Vector2(1.4, 1.4)
 
 	var tw := create_tween().set_parallel(true)
@@ -89,12 +95,12 @@ func spawn(world_pos: Vector2, amount: int,
 		.set_delay(FADE_DELAY) \
 		.set_trans(Tween.TRANS_SINE)
 
-	# Scale recovery em crits
-	if is_crit:
+	# Scale recovery em destaques
+	if big_scale:
 		tw.tween_property(lbl, "scale", Vector2.ONE, 0.15) \
 			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 	tw.chain().tween_callback(func():
-		print("DEBUG: Removendo label")
-		lbl.queue_free()
+		if is_instance_valid(lbl):
+			lbl.queue_free()
 	)

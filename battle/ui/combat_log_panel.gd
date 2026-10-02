@@ -109,6 +109,19 @@ func _build_panel() -> void:
 		log_lines_vbox.add_child(lbl)
 		_entry_lbls.append(lbl)
 
+	# Botão "×" para fechar o painel flutuante (canto superior direito)
+	var close_btn := Button.new()
+	close_btn.text = "×"
+	close_btn.custom_minimum_size = Vector2(20, 20)
+	close_btn.add_theme_font_size_override("font_size", 12)
+	close_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	close_btn.offset_left   = -24
+	close_btn.offset_right  = -4
+	close_btn.offset_top    = 4
+	close_btn.offset_bottom = 24
+	close_btn.pressed.connect(func() -> void: hide())
+	add_child(close_btn)
+
 # ======================================================
 # PUBLIC API
 # ======================================================

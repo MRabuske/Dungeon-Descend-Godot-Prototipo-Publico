@@ -6,10 +6,24 @@ func _init() -> void:
 	enemy_type   = "Goblin"
 	sprite       = preload("res://assets/sprites/enemy/goblin_scout/goblin_scout.png")
 	portrait     = preload("res://assets/ui/portraits/enemy/goblin_scout/goblin_scout.png")
+	sprite_frames = preload("res://assets/sprites/enemy/goblin_scout/goblin_scout_animation.tres")
+	sprite_scale = 0.5
 	ac           = 13
 	max_hp       = 20
 	speed        = 6
 	attack_bonus = 2
+	proficiency  = 2
+	crit_threshold = 20
+	damage_dice_count = 1
+	damage_dice_sides = 6
+	attack_damage_attribute = ActionData.DamageAttribute.DEX
+	level        = 1
+	strength     = 8
+	dexterity    = 14
+	constitution = 10
+	intelligence = 8
+	wisdom       = 8
+	charisma     = 8
 	action_pool = [
 		"Attacking %s...",
 		"Attacking %s...",

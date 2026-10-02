@@ -9,6 +9,7 @@ func _init() -> void:
 	attack_range     = 1
 	proj_color       = Color(1.0, 0.95, 0.6)
 	damage_attribute = DamageAttribute.WIS
-	base_damage_min  = 3
-	base_damage_max  = 7
+	damage_type      = DamageType.RADIANT
+	damage_dice_count = 1
+	damage_dice_sides = 8
 	icon 			 = preload("res://assets/ui/icons/attacks/atq_divino.png")

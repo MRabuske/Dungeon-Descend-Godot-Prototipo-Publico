@@ -6,10 +6,23 @@ func _init() -> void:
 	enemy_type   = "Mage"
 	sprite       = preload("res://assets/sprites/enemy/dark_mage/dark_mage.png")
 	portrait     = preload("res://assets/ui/portraits/enemy/dark_mage/dark_mage.png")
+	sprite_frames = preload("res://assets/sprites/enemy/dark_mage/dark_mage_animation.tres")
 	ac           = 11
 	max_hp       = 25
 	speed        = 5
 	attack_bonus = 5
+	proficiency  = 2
+	crit_threshold = 20
+	damage_dice_count = 1
+	damage_dice_sides = 6
+	attack_damage_attribute = ActionData.DamageAttribute.INT
+	level        = 4
+	strength     = 8
+	dexterity    = 12
+	constitution = 10
+	intelligence = 16
+	wisdom       = 14
+	charisma     = 12
 	action_pool = [
 		"Casting Shadow Bolt at %s...",
 		"Casting Shadow Bolt at %s...",

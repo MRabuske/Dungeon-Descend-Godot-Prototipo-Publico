@@ -14,30 +14,42 @@ extends Node
 # ──────────────────────────────────────────────────────
 const SFX_BANKS: Dictionary = {
 	# Impactos
+	"silent": [],
 	"impact_light": [
-		# preload("res://audio/sfx/impacts/hit_light_1.ogg"),
-		# preload("res://audio/sfx/impacts/hit_light_2.ogg"),
+		preload("res://audio/sfx/impacts/hit_light_1.ogg"),
+		preload("res://audio/sfx/impacts/hit_light_2.ogg"),
 		# preload("res://audio/sfx/impacts/hit_light_3.ogg"),
 	],
 	"impact_heavy": [
-		# preload("res://audio/sfx/impacts/hit_heavy_1.ogg"),
+		preload("res://audio/sfx/impacts/hit_heavy_1.ogg"),
 		# preload("res://audio/sfx/impacts/hit_heavy_2.ogg"),
 	],
 	"impact_crit": [
-		# preload("res://audio/sfx/impacts/hit_crit_1.ogg"),
+		preload("res://audio/sfx/impacts/hit_crit_1.ogg"),
 		# preload("res://audio/sfx/impacts/hit_crit_2.ogg"),
+	],
+	"impact_arrow": [
+		preload("res://audio/sfx/impacts/hit_arrow_1.ogg"),
 	],
 	# Whoosh de arma
 	"whoosh_sword": [
-		# preload("res://audio/sfx/movement/whoosh_1.ogg"),
-		# preload("res://audio/sfx/movement/whoosh_2.ogg"),
+		preload("res://audio/sfx/movement/whoosh_sword_1.ogg"),
+		preload("res://audio/sfx/movement/whoosh_sword_2.ogg"),
+		preload("res://audio/sfx/movement/whoosh_sword_3.ogg"),
+		preload("res://audio/sfx/movement/whoosh_sword_4.ogg"),
+		preload("res://audio/sfx/movement/whoosh_sword_5.ogg"),
 	],
 	"whoosh_magic": [
-		# preload("res://audio/sfx/movement/whoosh_magic_1.ogg"),
+		preload("res://audio/sfx/movement/whoosh_magic_1.ogg"),
+		preload("res://audio/sfx/movement/whoosh_magic_2.ogg"),
+	],
+	
+	"whoosh_bow": [
+		preload("res://audio/sfx/movement/whoosh_bow_3.ogg"),
 	],
 	# Passos
 	"step_stone": [
-		# preload("res://audio/sfx/movement/step_stone_1.ogg"),
+		preload("res://audio/sfx/movement/step_stone_1.ogg"),
 		# preload("res://audio/sfx/movement/step_stone_2.ogg"),
 	],
 	# Skills
@@ -46,11 +58,27 @@ const SFX_BANKS: Dictionary = {
 	],
 	# Morte
 	"death_hero": [
-		# preload("res://audio/sfx/death/hero_death_1.ogg"),
+		preload("res://audio/sfx/death/hero_death_1.ogg"),
 	],
 	"death_enemy": [
 		preload("res://audio/sfx/death/enemy_death_1.ogg"),
-		# preload("res://audio/sfx/death/enemy_death_2.ogg"),
+		preload("res://audio/sfx/death/enemy_death_2.ogg"),
+	],
+	"skill_fire": [
+		preload("res://audio/sfx/skills/spell_fire/fire_impact_1.ogg"),
+	],
+	"skill_ice": [
+		preload("res://audio/sfx/skills/spell_ice/ice_impact_1.ogg"),
+	],
+	"skill_thunder": [
+		preload("res://audio/sfx/skills/spell_thunder/thunder_impact_1.ogg"),
+		preload("res://audio/sfx/skills/spell_thunder/thunder_impact_2.ogg"),
+	],
+	"skill_holy": [
+		preload("res://audio/sfx/skills/holy/whoosh_holy_1.ogg"),
+	],
+	"chuva_flechas": [
+		preload("res://audio/sfx/skills/chuva_flechas/chuva_flechas_1.ogg"),
 	],
 }
 
@@ -137,3 +165,7 @@ func _get_free_player() -> AudioStreamPlayer2D:
 	# Todos ocupados: interrompe o mais antigo
 	_pool[0].stop()
 	return _pool[0]
+
+func stop_all() -> void:
+	for p: AudioStreamPlayer2D in _pool:
+		p.stop()

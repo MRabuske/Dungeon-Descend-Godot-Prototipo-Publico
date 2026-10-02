@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://wgxswwyouhwl"]
 
-[ext_resource type="Script" uid="uid://d2enuw4nhc1r2" path="res://battle/battle_scene.gd" id="1"]
+[ext_resource type="Script" uid="uid://b0bt65rwhpd76" path="res://battle/battle_scene.gd" id="1"]
 
 [node name="BattleScene" type="Control" unique_id=171176471]
 layout_mode = 3

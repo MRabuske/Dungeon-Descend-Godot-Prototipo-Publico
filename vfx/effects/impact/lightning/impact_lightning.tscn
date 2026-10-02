@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://p2vuj0dcgn8g"]
+
+[ext_resource type="Script" uid="uid://cbnrvxuox6587" path="res://vfx/effects/projectile/projectile_vfx.gd" id="1_bt8q0"]
+[ext_resource type="SpriteFrames" uid="uid://du5aepiyiy6uf" path="res://vfx/effects/impact/lightning/impact_lightning.tres" id="2_1ecb3"]
+
+[node name="ImpactThunder" type="Node2D" unique_id=1627931927]
+script = ExtResource("1_bt8q0")
+sprite_frames = ExtResource("2_1ecb3")
+metadata/_custom_type_script = "uid://bcok1fnn4kxu0"

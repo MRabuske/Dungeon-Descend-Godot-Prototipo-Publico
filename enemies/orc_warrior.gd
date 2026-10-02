@@ -6,10 +6,23 @@ func _init() -> void:
 	enemy_type   = "Orc"
 	sprite       = preload("res://assets/sprites/enemy/orc_warrior/orc_warrior.png")
 	portrait     = preload("res://assets/ui/portraits/enemy/orc_warrior/orc_warrior.png")
+	sprite_frames = preload("res://assets/sprites/enemy/orc_warrior/orc_warrior_animation.tres")
 	ac           = 15
 	max_hp       = 40
 	speed        = 4
 	attack_bonus = 4
+	proficiency  = 2
+	crit_threshold = 20
+	damage_dice_count = 1
+	damage_dice_sides = 8
+	attack_damage_attribute = ActionData.DamageAttribute.STR
+	level        = 3
+	strength     = 16
+	dexterity    = 10
+	constitution = 14
+	intelligence = 7
+	wisdom       = 8
+	charisma     = 8
 	action_pool = [
 		"Smashing %s...",
 		"Smashing %s...",

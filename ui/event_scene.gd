@@ -258,8 +258,15 @@ func _apply_one(ctype: int, value: int, target: String) -> String:
 				p["hp"] = maxi(1, p["hp"] - value)
 				return "(%s -%dHP)" % [p["name"], value]
 		C.MP_RESTORE_PARTY:
+			# Antigo "restaura MP" agora recupera 1 spell slot do nível mais baixo
+			# faltante para cada caster da party (non-casters não são afetados).
 			for p in BattleState.PLAYERS:
-				p["mp"] = mini(p["max_mp"], p["mp"] + value)
+				var slots: Array = p.get("spell_slots", [])
+				var slots_max: Array = p.get("spell_slots_max", [])
+				for i in range(slots.size()):
+					if i < slots_max.size() and slots[i] < slots_max[i]:
+						slots[i] += 1
+						break
 		C.BUFF_NEXT_BATTLE:
 			if DungeonState.current_run != null:
 				DungeonState.current_run.pending_buffs.append({"type": target, "value": value})

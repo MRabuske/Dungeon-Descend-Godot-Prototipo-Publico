@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://dfyqd184qgafy"]
+
+[ext_resource type="Script" uid="uid://caa55et6mwsda" path="res://vfx/effects/projectile/projectile_vfx.gd" id="1_bnxvh"]
+[ext_resource type="SpriteFrames" uid="uid://chktov40gapfw" path="res://vfx/effects/projectile/fire/fireball_anim.tres" id="2_dyjfd"]
+
+[node name="FireballProjectile" type="Node2D" unique_id=816360651]
+script = ExtResource("1_bnxvh")
+sprite_frames = ExtResource("2_dyjfd")
+metadata/_custom_type_script = "uid://caa55et6mwsda"

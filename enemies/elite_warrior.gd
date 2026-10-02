@@ -4,12 +4,26 @@ extends EnemyData
 func _init() -> void:
 	enemy_name   = "Elite Warrior"
 	enemy_type   = "EliteWarrior"
-	sprite       = preload("res://assets/sprites/enemy/orc_warrior/orc_warrior.png")
-	portrait     = preload("res://assets/ui/portraits/enemy/orc_warrior/orc_warrior.png")
+	sprite       = preload("res://assets/sprites/enemy/stone_golem/stone_golem.png")
+	portrait     = preload("res://assets/ui/portraits/enemy/stone_golem/stone_golem.png")
+	sprite_frames = preload("res://assets/sprites/enemy/stone_golem/stone_golem_animation.tres")
+	sprite_scale = 1.5
 	ac           = 17
 	max_hp       = 70
 	speed        = 4
 	attack_bonus = 7
+	proficiency  = 3
+	crit_threshold = 19
+	damage_dice_count = 1
+	damage_dice_sides = 10
+	attack_damage_attribute = ActionData.DamageAttribute.STR
+	level        = 5
+	strength     = 18
+	dexterity    = 12
+	constitution = 16
+	intelligence = 10
+	wisdom       = 10
+	charisma     = 10
 	action_pool = [
 		"Crushing Blow on %s...",
 		"Crushing Blow on %s...",

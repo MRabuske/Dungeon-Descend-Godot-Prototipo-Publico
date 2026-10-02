@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://7jshp3gi6i7f"]
+
+[ext_resource type="Script" uid="uid://caa55et6mwsda" path="res://vfx/effects/projectile/projectile_vfx.gd" id="1_l6u7q"]
+[ext_resource type="SpriteFrames" uid="uid://4ygamv8fyn0q" path="res://vfx/effects/impact/fire/impact_fire.tres" id="2_7lq7n"]
+
+[node name="ImpactFire" type="Node2D" unique_id=1170204490]
+script = ExtResource("1_l6u7q")
+sprite_frames = ExtResource("2_7lq7n")
+metadata/_custom_type_script = "uid://caa55et6mwsda"

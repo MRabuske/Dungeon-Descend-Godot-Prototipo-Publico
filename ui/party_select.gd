@@ -359,10 +359,10 @@ func _build_card(hname: String) -> NinePatchRect:
 	vbox.add_child(spacer)
 
 	for pair: Array in [
-		["HP",  "%d / %d" % [data.base_hp, data.max_hp]],
-		["MP",  "%d / %d" % [data.base_mp, data.max_mp]],
-		["AC",  str(data.ac)],
-		["SPD", str(data.speed)],
+		["HP",    "%d / %d" % [data.base_hp, data.max_hp]],
+		["SLOTS", _slots_summary(data)],
+		["AC",    str(data.ac)],
+		["SPD",   str(data.speed)],
 	]:
 		vbox.add_child(_build_stat_row(pair[0], pair[1]))
 
@@ -377,6 +377,17 @@ func _build_card(hname: String) -> NinePatchRect:
 # ======================================================
 # BUILD — LINHA DE STAT
 # ======================================================
+# Resumo compacto de spell slots / Ki para o card de seleção.
+# Caster: "4/3" (slots por nível). Monge: "5 Ki". Non-caster: "—".
+func _slots_summary(data: HeroData) -> String:
+	if data.ki_per_level > 0:
+		return "%d Ki" % data.ki_max()
+	var parts: Array[String] = []
+	for n in data.get_spell_slots_max():
+		if n > 0:
+			parts.append(str(n))
+	return "/".join(parts) if not parts.is_empty() else "—"
+
 func _build_stat_row(key: String, value: String) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
