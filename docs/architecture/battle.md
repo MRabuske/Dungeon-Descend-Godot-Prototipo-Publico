@@ -129,6 +129,8 @@ Each panel receives `setup(state)` in `BattleScene._initialize_state()` and is r
 
 MOVE_MODE and ATTACK_MODE share `BattleState.cursor_tile`. Arrows and D-pad step one tile (elevation ignored); mouse hover and the stick set it directly. Any tile can be selected; `get_cursor_feedback()` says whether confirming there is valid and why not, and `apply_cursor_selection()` only commits valid tiles. This replaced the old locked navigation (`move_cursor_grid`, `cycle_attack_target`, `move_attack_tile_cursor`). Details in [input.md](input.md#grid-cursor-combat).
 
+Clicking (or Enter/A on) any targeted attack, spell or skill **always** enters ATTACK_MODE and shows the range, even when no target is valid right now (`BattleScene._execute_action` never cancels the aim on its own). Aiming at an invalid target shows the reason beside the cursor ("Fora de alcance", "Sem linha de visão", "Sem alvo"…), executes nothing and spends nothing; Esc/B or the Voltar button leaves. The line-of-sight and range rules are unchanged. End-to-end coverage: `_test_hero_actions_e2e` (every hero action, click and keyboard) and `_test_enemy_actions_e2e` (every enemy behavior).
+
 ### Combat log
 
 `BattleState._log(text, type)` prepends to `combat_log` (capped at 60); the panel shows the latest 25. Types: `dmg` (red), `heal` (green), `miss` (tan), `status` (purple), `crit` (gold), `system` (gray, the default).

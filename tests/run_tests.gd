@@ -5,7 +5,7 @@ var _failed := 0
 # Um erro de runtime aborta a função de teste em silêncio e o que vem depois nunca roda. Cada função
 # de alto nível registra aqui que chegou ao fim; se faltar, a suíte falha (ver _check_completion).
 var _reached: Array = []
-const EXPECTED_TO_FINISH := ["_run_all", "_test_architecture_p2p7", "_test_bg3_rules_audit", "_test_movement_8dir", "_test_unified_metric", "_test_pass_through_allies", "_test_potion_cover_initiative", "_test_phase5_bg3_fixes", "_test_area_shapes", "_test_area_integration", "_test_shared_turn", "_test_enemy_target_downed", "_test_member_end_turn", "_test_class_registry", "_test_gamepad_support", "_test_hud_navigation", "_test_battle_scene_smoke", "_test_oa_preview", "_test_focus_ring"]
+const EXPECTED_TO_FINISH := ["_run_all", "_test_architecture_p2p7", "_test_bg3_rules_audit", "_test_movement_8dir", "_test_unified_metric", "_test_pass_through_allies", "_test_potion_cover_initiative", "_test_phase5_bg3_fixes", "_test_area_shapes", "_test_area_integration", "_test_shared_turn", "_test_enemy_target_downed", "_test_member_end_turn", "_test_class_registry", "_test_gamepad_support", "_test_hud_navigation", "_test_battle_scene_smoke", "_test_oa_preview", "_test_focus_ring", "_test_hero_actions_e2e", "_test_enemy_actions_e2e"]
 
 # Os testes só gravam nesta pasta própria; o save do jogador fica em outro arquivo e nunca é
 # aberto para escrita nem apagado. Ao fim, a suíte prova que ele não mudou (_check_save_isolation).
@@ -4286,6 +4286,8 @@ func _run_all() -> void:
 	await _test_battle_scene_smoke()
 	await _test_oa_preview()
 	await _test_focus_ring()
+	await _test_hero_actions_e2e()
+	await _test_enemy_actions_e2e()
 	_reached.append("_run_all")
 
 # ── Auditoria BG3: regras conferidas na bg3.wiki (Poisoned, Prone, Stunned, Downed, Sneak Attack) ──
@@ -6873,3 +6875,466 @@ func _labels_text(node: Node) -> String:
 			out += (c as Label).text + "|"
 		out += _labels_text(c)
 	return out
+
+# ── Ações dos heróis de ponta a ponta: barra de ações → mira → efeito ─────────────────────────────────
+# Para CADA ação de CADA herói, pelo clique real na célula da barra: (1) entra na mira mesmo SEM alvo
+# válido (alvo atrás de parede/fora de alcance) e mostra o motivo ao mirar um alvo inválido, sem gastar
+# nada; (2) Esc e o botão Voltar saem; (3) o teclado (Enter no item sob o anel) entra na mesma mira;
+# (4) com alvo em alcance e linha de visão, confirma e o custo e o efeito se aplicam. Um resultado por ação.
+const E2E_FOE_NEAR := 3
+const E2E_FAR := Vector2i(8, 3)
+# Ações que, por DADO atual, nunca ficam disponíveis (a barra as esmaece e o clique é recusado). Qualquer outra
+# ação indisponível com recursos cheios é falha do teste.
+const E2E_KNOWN_UNAVAILABLE := {
+	"Arqueiro/Chuva de Flechas": "exige slot de nível 2; o Arqueiro nv.4 (meio-conjurador) só tem slots de nível 1",
+}
+
+func _e2e_open(hero: String) -> Dictionary:
+	var ally := "Guerreiro" if hero != "Guerreiro" else "Mago"
+	BattleState.setup_party([hero, ally])
+	DiceRoller.force_next([20, 19, 1, 1, 1, 1, 1, 1])   # iniciativa: os dois heróis primeiro
+	var scene = load("res://battle/battle_scene.tscn").instantiate()
+	root.add_child(scene)
+	await _frames(3)
+	DiceRoller.clear_forced()
+	var waited := 0
+	while waited < 1500 and (scene._animating or scene._state.current_state != BattleState.State.PLAYER_TURN):
+		await process_frame
+		waited += 1
+	var st: BattleState = scene._state
+	var ctx := {"scene": scene, "st": st, "panel": scene._action_panel, "hero": -1, "ally": -1, "foes": []}
+	for i in range(BattleState.TURN_QUEUE.size()):
+		var nm: String = BattleState.TURN_QUEUE[i]["name"]
+		if not BattleState.TURN_QUEUE[i]["is_player"]:
+			ctx["foes"].append(i)
+		elif nm == hero:
+			ctx["hero"] = i
+		elif nm == ally:
+			ctx["ally"] = i
+	if st.active_index != ctx["hero"]:
+		st.switch_active_member(ctx["hero"])
+	scene._refresh_ui()
+	return ctx
+
+# Tabuleiro limpo e recursos cheios; herói em (3,3), aliado em (2,3), inimigo-alvo a `foe_dist` casas.
+func _e2e_reset(ctx: Dictionary, foe_dist: int, wall: bool = false) -> void:
+	var st: BattleState = ctx["st"]
+	for c in range(st.grid_cols):
+		for r in range(st.grid_rows):
+			var t: TerrainTile = st.tile_data_map[c][r]
+			t.ground = TerrainTile.GroundType.NORMAL
+			t.object = TerrainTile.ObjectType.STATUE if (wall and c == 5) else TerrainTile.ObjectType.NONE
+	st.tile_surfaces.clear()
+	st.concentration_by_caster.clear()
+	st._uses_spent.clear()
+	st.dead_indices.clear()
+	st.battle_result = ""
+	st.has_attacked = false
+	st.has_used_bonus_action = false
+	st.fury_extra_attack = false
+	st.move_points_remaining = 8
+	st.last_attack_info.clear()
+	var h: int = ctx["hero"]
+	var a: int = ctx["ally"]
+	var foes: Array = ctx["foes"]
+	var hero_hd: HeroData = BattleState.ALL_HERO_DATA[BattleState.TURN_QUEUE[h]["name"]]
+	var p: Dictionary = BattleState.PLAYERS[st.player_index_of(h)]
+	p["spell_slots"] = hero_hd.get_spell_slots_max()
+	p["ki"] = hero_hd.ki_max()
+	for pk in p.get("pools", {}).keys():
+		p["pools"][pk]["current"] = p["pools"][pk].get("max", 0)
+	for idx in [h, a] + foes:
+		st.combatant_statuses[idx] = {}
+	st._set_hp(h, p["max_hp"])
+	st._set_hp(a, 10)
+	for f in foes:
+		st._set_hp(f, st.get_enemy_max_hp(f))
+	st.combatant_positions[h] = Vector2i(3, 3)
+	st.combatant_positions[a] = Vector2i(2, 3)
+	for k in range(foes.size()):   # os outros inimigos ficam longe de tudo
+		st.combatant_positions[foes[k]] = Vector2i(11, k * 2)
+	st.combatant_positions[foes[0]] = Vector2i(3 + foe_dist, 3)
+	st._potion_item()["count"] = 2
+	ctx["scene"]._clear_pending_actions()
+	ctx["panel"].hide_action_bar()
+	ctx["scene"]._refresh_ui()
+
+func _e2e_cell(ctx: Dictionary, action_label: String) -> ActionPanel.GridCell:
+	for e in ctx["panel"]._nav_entries():
+		var ctl: Control = ctx["panel"]._nav_control(e["id"])
+		if ctl is ActionPanel.GridCell and (ctl as ActionPanel.GridCell).action != null \
+				and (ctl as ActionPanel.GridCell).action.label == action_label:
+			return ctl as ActionPanel.GridCell
+	return null
+
+# Clique de verdade na célula da barra (soltar o botão esquerdo sobre ela).
+func _e2e_click(cell: ActionPanel.GridCell) -> void:
+	var up := InputEventMouseButton.new()
+	up.button_index = MOUSE_BUTTON_LEFT
+	up.pressed = false
+	cell._gui_input(up)
+
+func _e2e_wait(ctx: Dictionary) -> void:
+	var scene = ctx["scene"]
+	var waited := 0
+	while waited < 2500 and (scene._animating or scene._reaction_pending):
+		if scene._reaction_pending:
+			scene._reaction_popup._resolve([])   # recusa Smite/Golpe Atordoante: o teste mede só a ação
+		await process_frame
+		waited += 1
+	await _frames(2)
+
+func _e2e_slots(st: BattleState, hero: int) -> int:
+	var total := 0
+	for n in BattleState.PLAYERS[st.player_index_of(hero)]["spell_slots"]:
+		total += int(n)
+	return total
+
+func _e2e_targets_ally(action: ActionData) -> bool:
+	return action is AcaoArremessarPocao or (action.targets_allies and not (action is AcaoPular))
+
+func _e2e_save_based(action: ActionData) -> bool:
+	return action.requires_saving_throw or action.condition_save_attribute != ActionData.DamageAttribute.NONE
+
+func _key_event(code: int) -> InputEventKey:
+	var ev := InputEventKey.new()
+	ev.keycode = code as Key
+	ev.physical_keycode = code as Key
+	ev.pressed = true
+	return ev
+
+# Resultado de uma ação com alvo: "" se tudo certo, ou a primeira falha (texto).
+func _e2e_attack_action(ctx: Dictionary, action: ActionData) -> String:
+	var scene = ctx["scene"]
+	var st: BattleState = ctx["st"]
+	var panel = ctx["panel"]
+	var h: int = ctx["hero"]
+	var a: int = ctx["ally"]
+	var foe: int = ctx["foes"][0]
+	var label := action.label
+	var to_ally := _e2e_targets_ally(action)
+	var tgt: int = a if to_ally else foe
+	var near: int = 1 if action.attack_range <= 1 else E2E_FOE_NEAR
+
+	_e2e_reset(ctx, near)
+	if not st.is_item_available(action):
+		if not E2E_KNOWN_UNAVAILABLE.has("%s/%s" % [BattleState.TURN_QUEUE[h]["name"], label]):
+			return "indisponível com os recursos cheios"
+		_e2e_click(_e2e_cell(ctx, label))
+		if st.current_state != BattleState.State.PLAYER_TURN or st.has_attacked or st.has_used_bonus_action:
+			return "ação indisponível foi aceita pelo clique"
+		return ""
+
+	# (1) Alvo atrás da parede / fora de alcance: ENTRA na mira, mostra o alcance e o motivo; nada é gasto.
+	_e2e_reset(ctx, E2E_FOE_NEAR, true)
+	st.combatant_positions[tgt] = E2E_FAR
+	scene._refresh_ui()
+	var cell := _e2e_cell(ctx, label)
+	if cell == null:
+		return "a ação não está na barra"
+	var slots0 := _e2e_slots(st, h)
+	_e2e_click(cell)
+	if st.current_state != BattleState.State.ATTACK_MODE:
+		return "clicar na ação sem alvo válido NÃO entrou na mira (estado %d)" % st.current_state
+	if st.current_attack_range <= 0:
+		return "a mira não definiu o alcance"
+	st.cursor_tile = E2E_FAR
+	var fb: Dictionary = st.get_cursor_feedback()
+	if fb["valid"] or str(fb["reason"]) == "":
+		return "alvo inválido sem motivo (valid=%s reason='%s')" % [fb["valid"], fb["reason"]]
+	scene._confirm_cursor()
+	if st.current_state != BattleState.State.ATTACK_MODE or st.has_attacked or st.has_used_bonus_action \
+			or _e2e_slots(st, h) != slots0:
+		return "mirar alvo inválido executou algo ou gastou recurso"
+	scene._handle_attack_mode(_key_event(KEY_ESCAPE))
+	if st.current_state != BattleState.State.PLAYER_TURN or st.has_attacked or st.has_used_bonus_action:
+		return "Esc não saiu da mira / gastou recurso"
+	_e2e_click(cell)
+	if st.current_state != BattleState.State.ATTACK_MODE:
+		return "não reentrou na mira"
+	panel._on_cancel_action()   # botão Voltar
+	if st.current_state != BattleState.State.PLAYER_TURN or st.has_attacked or st.has_used_bonus_action:
+		return "o botão Voltar não saiu da mira / gastou recurso"
+
+	# (1b) Alvo longe demais (sem parede): entra na mira e o motivo é "Fora de alcance".
+	if action.attack_range < 10 and not (action is AcaoPular):
+		_e2e_reset(ctx, E2E_FOE_NEAR)
+		st.combatant_positions[h] = Vector2i(0, 3)
+		st.combatant_positions[tgt] = Vector2i(11, 3)
+		scene._refresh_ui()
+		_e2e_click(cell)
+		if st.current_state != BattleState.State.ATTACK_MODE:
+			return "alvo fora de alcance: a ação não entrou na mira"
+		st.cursor_tile = Vector2i(11, 3)
+		if str(st.get_cursor_feedback()["reason"]) != "Fora de alcance":
+			return "alvo fora de alcance: motivo esperado \"Fora de alcance\", veio \"%s\"" % st.get_cursor_feedback()["reason"]
+		scene._confirm_cursor()
+		if st.current_state != BattleState.State.ATTACK_MODE or st.has_attacked or st.has_used_bonus_action:
+			return "alvo fora de alcance executou algo ou gastou recurso"
+		panel._on_cancel_action()
+
+	# (2) Teclado: o item sob o anel + Enter entra na mesma mira (e Esc sai).
+	_e2e_reset(ctx, near)
+	for e in panel._nav_entries():
+		if panel._nav_control(e["id"]) == cell:
+			panel._nav_set(e["id"])
+	await _press_key(KEY_ENTER)
+	if st.current_state != BattleState.State.ATTACK_MODE:
+		return "Enter no item sob o anel não entrou na mira"
+	await _press_key(KEY_ESCAPE)
+	if st.current_state != BattleState.State.PLAYER_TURN:
+		return "Esc (teclado) não saiu da mira"
+
+	# (3) Alvo em alcance e linha de visão: mira, confirma, custo e efeito.
+	_e2e_reset(ctx, near)
+	var ally_hp0: int = st.get_hp(a)
+	var foe_hp0: int = st.get_hp(foe)
+	var ki0: int = int(BattleState.PLAYERS[st.player_index_of(h)].get("ki", 0))
+	slots0 = _e2e_slots(st, h)
+	var h_pos0: Vector2i = st.combatant_positions[h]
+	if action.creates_surface == SurfaceType.Type.ELECTRIFIED_WATER:   # o Trovão só eletrifica Água que já existe
+		for dx in range(-2, 3):
+			for dy in range(-2, 3):
+				st._add_surface(st.combatant_positions[tgt] + Vector2i(dx, dy), SurfaceType.Type.WATER)
+	var fill: Array = []
+	fill.resize(80)
+	fill.fill(1 if _e2e_save_based(action) else 20)   # save: falha; ataque: acerta (dados no máximo/mínimo)
+	DiceRoller.force_next(fill)
+	_e2e_click(cell)
+	if st.current_state != BattleState.State.ATTACK_MODE:
+		return "com alvo válido a ação não entrou na mira"
+	var aim: Vector2i = st.combatant_positions[tgt]
+	if action is AcaoPular:
+		aim = Vector2i(-1, -1)
+		for dx in range(-2, 3):
+			for dy in range(-2, 3):
+				if aim.x < 0 and (dx != 0 or dy != 0):
+					st.cursor_tile = h_pos0 + Vector2i(dx, dy)
+					if st.get_cursor_feedback()["valid"]:
+						aim = st.cursor_tile
+		if aim.x < 0:
+			return "nenhum pouso válido para o Pulo"
+	elif st.attack_tile_mode:
+		var found := false
+		var base: Vector2i = aim
+		for dx in range(-2, 3):
+			for dy in range(-2, 3):
+				st.cursor_tile = base + Vector2i(dx, dy)
+				if not found and st.get_cursor_feedback()["valid"] \
+						and st.area_footprint(action, st.cursor_tile, h).has(st.combatant_positions[tgt]):
+					found = true
+					aim = st.cursor_tile
+		if not found:
+			return "nenhum ponto de mira válido cobre o alvo"
+	scene._on_tile_clicked(aim)   # o mesmo caminho do clique no grid: seleciona e confirma
+	await _e2e_wait(ctx)
+	DiceRoller.clear_forced()
+	var spent_main: bool = st.has_attacked
+	var spent_bonus: bool = st.has_used_bonus_action
+	if st.current_state != BattleState.State.PLAYER_TURN:
+		return "depois de confirmar o estado não voltou ao turno (estado %d)" % st.current_state
+	if action.bonus_action and not (spent_bonus and not spent_main):
+		return "ação bônus: gastou main=%s bonus=%s" % [spent_main, spent_bonus]
+	if not action.bonus_action and not spent_main:
+		return "ação principal não foi gasta"
+	if action.spell_slot_level > 0 and _e2e_slots(st, h) != slots0 - 1:
+		return "slot: esperava gastar 1 (%d → %d)" % [slots0, _e2e_slots(st, h)]
+	if action.spell_slot_level == 0 and _e2e_slots(st, h) != slots0:
+		return "gastou slot sem custo de slot"
+	var ki1: int = int(BattleState.PLAYERS[st.player_index_of(h)].get("ki", 0))
+	if ki1 != ki0 - action.ki_cost:
+		return "ki: esperava %d, ficou %d" % [ki0 - action.ki_cost, ki1]
+	# Efeito
+	if action is AcaoPular:
+		return "" if st.combatant_positions[h] == aim else "o herói não foi para o ponto mirado"
+	if action is AcaoEmpurrar:
+		return ""   # custo gasto; o deslocamento depende do teste de Atletismo
+	if action is AcaoArremessarPocao:
+		if int(st._potion_item()["count"]) != 1:
+			return "a poção não foi consumida"
+		return "" if st.get_hp(a) > ally_hp0 else "a nuvem não curou o aliado"
+	if action.damage_type == ActionData.DamageType.HEALING:
+		if action.revives_downed:
+			return ""
+		return "" if st.get_hp(a) > ally_hp0 else "a cura não subiu o HP do alvo"
+	if action.revives_downed:
+		return ""
+	if action.damage_dice_count > 0 and not to_ally:
+		if not (st.get_hp(foe) < foe_hp0 or st.dead_indices.has(foe)):
+			return "o dano não foi aplicado (HP %d → %d)" % [foe_hp0, st.get_hp(foe)]
+	if action.applies_condition != "" and not to_ally and not st.dead_indices.has(foe):
+		if int(st.combatant_statuses[foe].get(action.applies_condition, 0)) <= 0:
+			return "a condição '%s' não foi aplicada" % action.applies_condition
+	if action.creates_surface != SurfaceType.Type.NONE and st.tile_surfaces.is_empty():
+		return "a superfície não foi criada"
+	return ""
+
+func _test_hero_actions_e2e() -> void:
+	var saved_tq: Array = BattleState.TURN_QUEUE
+	var saved_pl: Array = BattleState.PLAYERS
+	var saved_run = DungeonState.current_run
+	DungeonState.current_run = null
+	var idev: Node = root.get_node("InputDevice")
+	var saved_pointer: bool = idev.tracker.pointer_active
+	var report: Array[String] = []
+	for hero: String in BattleState.ALL_HERO_DATA.keys():
+		var ctx: Dictionary = await _e2e_open(hero)
+		var st: BattleState = ctx["st"]
+		_true("%s: a cena abriu no turno do herói" % hero, st.current_state == BattleState.State.PLAYER_TURN and ctx["hero"] >= 0)
+		var labels: Array[String] = []
+		for e in ctx["panel"]._nav_entries():
+			var ctl: Control = ctx["panel"]._nav_control(e["id"])
+			if ctl is ActionPanel.GridCell and (ctl as ActionPanel.GridCell).action != null:
+				labels.append((ctl as ActionPanel.GridCell).action.label)
+		for lbl in labels:
+			var action: ActionData = _e2e_cell(ctx, lbl).action
+			var err := ""
+			match action.action_type:
+				ActionData.Type.ATTACK:
+					err = await _e2e_attack_action(ctx, action)
+				ActionData.Type.MOVE:
+					_e2e_reset(ctx, E2E_FOE_NEAR)
+					_e2e_click(_e2e_cell(ctx, lbl))
+					if st.current_state != BattleState.State.MOVE_MODE:
+						err = "Mover não entrou no modo de movimento"
+					else:
+						ctx["panel"]._on_cancel_action()
+						if st.current_state != BattleState.State.PLAYER_TURN:
+							err = "Voltar não saiu do movimento"
+				ActionData.Type.DASH:
+					_e2e_reset(ctx, E2E_FOE_NEAR)
+					var mp0: int = st.move_points_remaining
+					_e2e_click(_e2e_cell(ctx, lbl))
+					if not st.has_attacked or st.move_points_remaining <= mp0:
+						err = "Correr não gastou a ação nem deu movimento"
+				ActionData.Type.END_TURN:
+					_e2e_reset(ctx, E2E_FOE_NEAR)
+					_e2e_click(_e2e_cell(ctx, lbl))
+					if not ctx["panel"]._action_bar_active:
+						err = "a ação não abriu a barra Confirmar/Voltar"
+					else:
+						ctx["panel"]._on_cancel_action()
+						if st.has_attacked or st.has_used_bonus_action:
+							err = "Voltar gastou recurso"
+						elif not (lbl in ["Esperar", "Fugir"]):   # estas encerram turno/batalha: só a barra é verificada
+							_e2e_click(_e2e_cell(ctx, lbl))
+							ctx["panel"]._on_confirm_action()
+							if not (st.has_attacked or st.has_used_bonus_action):
+								err = "confirmar não gastou o custo"
+			DiceRoller.clear_forced()
+			_eq("%s / %s" % [hero, lbl], err, "")
+			report.append(("E2E %-9s %-18s %s" % [hero, lbl, ("INDISPONÍVEL (clique recusado): " + E2E_KNOWN_UNAVAILABLE[hero + "/" + lbl] if E2E_KNOWN_UNAVAILABLE.has(hero + "/" + lbl) else "OK") if err == "" else "FALHA: " + err]))
+		ctx["scene"].queue_free()
+		await _frames(2)
+	for line in report:
+		print(line)
+	idev.tracker.pointer_active = saved_pointer
+	BattleState.TURN_QUEUE = saved_tq
+	BattleState.PLAYERS = saved_pl
+	DungeonState.current_run = saved_run
+	_reached.append("_test_hero_actions_e2e")
+
+# ── Ações dos inimigos: cada comportamento de cada inimigo, pelo mesmo caminho da IA ───────────────────
+# `apply_enemy_attack()` com o comportamento escolhido, herói em alcance e com linha de visão: dano, área,
+# atordoamento, fúria, teletransporte e fuga fazem o que o dado promete. Um resultado por comportamento.
+func _enemy_fixture(etype: String, d: int) -> Array:
+	var bs := _move_fixture()
+	for c in range(bs.grid_cols):
+		for r in range(bs.grid_rows):
+			var t: TerrainTile = bs.tile_data_map[c][r]
+			t.ground = TerrainTile.GroundType.NORMAL
+			t.object = TerrainTile.ObjectType.NONE
+	var e := -1
+	for i in range(BattleState.TURN_QUEUE.size()):
+		if not BattleState.TURN_QUEUE[i]["is_player"] and BattleState.TURN_QUEUE[i].get("type", "") == etype:
+			e = i
+	var k := 0
+	for i in range(BattleState.TURN_QUEUE.size()):
+		bs.combatant_positions[i] = Vector2i(11, k % bs.grid_rows)
+		k += 1
+	bs.combatant_positions[0] = Vector2i(5, 3)
+	bs.combatant_positions[1] = Vector2i(0, 6)
+	bs.combatant_positions[e] = Vector2i(5 + d, 3)
+	bs.active_index = e
+	bs.current_state = BattleState.State.ENEMY_TURN
+	return [bs, e]
+
+func _test_enemy_actions_e2e() -> void:
+	var saved_tq: Array = BattleState.TURN_QUEUE
+	var saved_pl: Array = BattleState.PLAYERS
+	var report: Array[String] = []
+	for etype: String in BattleState.ALL_ENEMIES.keys():
+		var edata: EnemyData = BattleState.ALL_ENEMIES[etype]
+		for i in range(edata.action_behaviors.size()):
+			var b: Dictionary = edata.action_behaviors[i]
+			var rng := int(b.get("range", 1))
+			var d: int = clampi(rng, 1, 3)
+			var ename := "%s #%d" % [etype, i]
+			var err := ""
+			var fx := _enemy_fixture(etype, d)
+			var bs: BattleState = fx[0]
+			var e: int = fx[1]
+			bs.active_enemy_action_idx = i
+			bs.enemy_action_text = edata.action_pool[mini(i, edata.action_pool.size() - 1)]   # a fuga lê o texto da ação
+			var hp0: int = bs.get_hp(0)
+			var fill: Array = []
+			fill.resize(60)
+			fill.fill(20)
+			DiceRoller.force_next(fill)
+			if b.get("is_flee", false):
+				var dist0: int = BattleState.king_dist(bs.combatant_positions[e], bs.combatant_positions[0])
+				var path: Array[Vector2i] = bs.get_enemy_move_path()
+				bs.apply_enemy_move(path)
+				if BattleState.king_dist(bs.combatant_positions[e], bs.combatant_positions[0]) <= dist0:
+					err = "fuga não aumentou a distância"
+				elif bs.apply_enemy_attack().get("target", Vector2i(0, 0)) != Vector2i(-1, -1):
+					err = "fuga atacou"
+			elif b.get("is_self_buff", false):
+				var pos0: Vector2i = bs.combatant_positions[e]
+				bs.apply_enemy_attack()
+				match str(b.get("buff_type", "")):
+					"raging":
+						if int(bs.combatant_statuses[e].get("raging", 0)) <= 0:
+							err = "não entrou em Fúria"
+					"teleporting":
+						if bs.combatant_positions[e] == pos0:
+							err = "não teletransportou"
+					_:
+						err = "buff '%s' sem implementação" % b.get("buff_type", "")
+				if bs.get_hp(0) != hp0:
+					err = "buff causou dano"
+			else:
+				var info: Dictionary = bs.apply_enemy_attack()
+				if int(b.get("aoe_ft", 0)) > 0:
+					if bs.get_hp(0) >= hp0:
+						err = "a área não atingiu o herói adjacente"
+				elif info.get("target", Vector2i(-1, -1)) != bs.combatant_positions[0]:
+					err = "não escolheu o herói em alcance (%s)" % str(info.get("target"))
+				elif bs.get_hp(0) >= hp0:
+					err = "o ataque não causou dano (HP %d → %d)" % [hp0, bs.get_hp(0)]
+				if err == "" and rng > 1 and not bool(info.get("is_ranged", true)) and int(b.get("aoe_ft", 0)) == 0:
+					err = "ataque à distância não marcado como ranged"
+				# Atordoamento: a chance tem de se realizar em algum momento.
+				if err == "" and float(b.get("status_chance", 0.0)) > 0.0:
+					var stunned: bool = bs.combatant_statuses[0].get("stun", 0) > 0
+					var tries := 0
+					while not stunned and tries < 60:
+						tries += 1
+						seed(tries)
+						var fx2 := _enemy_fixture(etype, d)
+						var bs2: BattleState = fx2[0]
+						bs2.active_enemy_action_idx = i
+						DiceRoller.force_next(fill)
+						bs2.apply_enemy_attack()
+						DiceRoller.clear_forced()
+						stunned = bs2.combatant_statuses[0].get("stun", 0) > 0
+					if not stunned:
+						err = "a chance de atordoar (%s) nunca se realizou em 60 tentativas" % b.get("status_chance")
+			DiceRoller.clear_forced()
+			_eq("inimigo %s / %s" % [ename, str(edata.action_pool[mini(i, edata.action_pool.size() - 1)]).substr(0, 24)], err, "")
+			report.append("ENEMY %-15s %-28s %s" % [ename, str(edata.action_pool[mini(i, edata.action_pool.size() - 1)]).substr(0, 28), "OK" if err == "" else "FALHA: " + err])
+	for line in report:
+		print(line)
+	BattleState.TURN_QUEUE = saved_tq
+	BattleState.PLAYERS = saved_pl
+	_reached.append("_test_enemy_actions_e2e")

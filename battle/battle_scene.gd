@@ -750,13 +750,8 @@ func _execute_action(action: ActionData) -> void:
 				action.attack_range, action.targets_allies,
 				action.proj_color, action.self_target,
 				action.bonus_action)
-			# Ranged sem linha de visão até nenhum alvo: avisa e volta ao neutro.
-			if action.attack_range > 1 and _state.current_state == BattleState.State.ATTACK_MODE \
-					and not _state.attack_tile_mode and not action.self_target \
-					and not action.targets_allies and _state.attack_target_indices.is_empty():
-				_state.cancel_attack()
-				_pending_attack_action = null
-				_state._log("Sem linha de visão até um alvo — reposicione para abrir o ângulo.", "miss")
+			# Sempre entra na mira e mostra o alcance, mesmo sem nenhum alvo válido agora (BG3): mirar um alvo
+			# inválido mostra o motivo junto ao cursor (get_cursor_feedback); Esc/Voltar saem.
 			_sync_cursor_on_enter()
 			_refresh_ui()
 
