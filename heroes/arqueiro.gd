@@ -12,7 +12,6 @@ func _init() -> void:
 	max_hp       = 100
 	caster_type  = CasterType.HALF
 	ac           = 14
-	initiative   = 10
 	speed        = 8
 	proficiency  = 3
 	strength     = 12
@@ -22,6 +21,7 @@ func _init() -> void:
 	constitution = 12
 	charisma     = 10
 	save_proficiencies = ["STR", "DEX"]
-	weapon = HeroData.make_weapon("Longbow", 1, 8, ActionData.DamageAttribute.DEX)
+	weapon = HeroData.make_weapon("Longbow", 1, 8, ActionData.DamageAttribute.DEX, false, 0, ActionData.DamageType.PIERCING)
+	weapon.is_ranged = true
 	actions = [AtqRapido.new(), AtqPreciso.new(), AcaoMover.new()]
 	skills  = [SkillChuvaFlechas.new()]

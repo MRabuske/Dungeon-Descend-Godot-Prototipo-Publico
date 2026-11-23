@@ -17,6 +17,7 @@ func _init() -> void:
 	damage_dice_count = 1
 	damage_dice_sides = 6
 	attack_damage_attribute = ActionData.DamageAttribute.DEX
+	attack_damage_type      = ActionData.DamageType.SLASHING
 	level        = 1
 	strength     = 8
 	dexterity    = 14
@@ -32,9 +33,9 @@ func _init() -> void:
 		"Fleeing!",
 	]
 	action_behaviors = [
-		{"range": 1, "damage_mult": 1.0,  "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
-		{"range": 1, "damage_mult": 1.0,  "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
-		{"range": 3, "damage_mult": 0.85, "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
-		{"range": 3, "damage_mult": 0.85, "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
-		{"range": 0, "damage_mult": 0.0,  "aoe_radius": 0, "is_self_buff": false, "is_flee": true,  "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
+		{"range": 1, "damage_mult": 1.0,  "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
+		{"range": 1, "damage_mult": 1.0,  "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
+		{"damage_type": ActionData.DamageType.PIERCING, "range": 3, "damage_mult": 0.85, "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
+		{"damage_type": ActionData.DamageType.PIERCING, "range": 3, "damage_mult": 0.85, "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
+		{"range": 0, "damage_mult": 0.0,  "aoe_ft": 0, "is_self_buff": false, "is_flee": true,  "applies_status": "",        "status_chance": 0.0, "buff_type": "",        "buff_value": 0, "buff_turns": 0},
 	]

@@ -4,205 +4,122 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**Dungeon Descend Prototype** — tactical turn-based combat game in Godot 4.6 (GDScript), isometric perspective, 1280×720, D3D12 on Windows.
+**Dungeon Descend Prototype**: a 2D turn-based tactical combat game with an isometric grid and dungeon runs. Combat follows **Baldur's Gate 3** faithfully; characters, classes, spells and progression follow **D&D 5e (2024 revision)**; the grid follows tabletop D&D. BG3 and D&D are not identical, so never assume a rule from one for the other. Read `.claude/rules/game-rules.md` (the single source of truth) before any rules work.
+
+- **Engine:** Godot 4.7.2 (`project.godot` features `4.7`), Forward Plus renderer, D3D12 on Windows.
+- **Language:** GDScript only, with statically typed code (`: int`, `-> void`, `:=`). No C#, no addons.
+- **Display:** 1280×720, nearest-neighbor texture filter (pixel art), pixel font `assets/fonts/PressStart2P-Regular.ttf`.
+- Identifiers, comments and UI text are mostly in **Portuguese** (`acao_*`, `atq_*`, `Guerreiro`, `HABILIDADES`).
 
 ## Commands
 
-**Run the game** (Godot Editor):
-- Open project in Godot 4.6+, press **F5** or click **Play**
+`$GODOT` is the editor executable (set in the gitignored `.claude/settings.local.json`).
 
-**Run via CLI:**
-```
-godot --path "C:/Users/matca/Desktop/VScode/Dungeon-Descend-Prototype"
-```
-
-**Run tests (headless):**
-```
-godot --headless --script tests/run_tests.gd
-```
-`tests/run_tests.gd` extends `SceneTree`, so it runs without a display. Exits 0 on all-pass, 1 on any failure.
-
-## Architecture Overview
-
-### Scene Flow
-
-```
-ui/main_menu.tscn
-  → ui/party_select.tscn      (hero selection — calls BattleState.setup_party())
-    → ui/dungeon_map.tscn      (dungeon navigation — reads DungeonState.current_run)
-      → battle/battle_scene.tscn   (combat)
-      → ui/event_scene.tscn        (EVENT / MYSTERY rooms)
+```bash
+"$GODOT" --path .                                              # run the game (main scene: ui/main_menu.tscn)
+"$GODOT" --headless --script tests/run_tests.gd 2>&1 | grep -E "FAIL|Results|SCRIPT ERROR"   # full suite, a few seconds
+"$GODOT" --headless --check-only --script res://path/file.gd   # quick parse check of one script, <1 s
+"$GODOT" --headless --path . --script .claude/skills/godot-gdscript/assets/check_scripts_compile.gd   # whole-project parse check (read-only)
+"$GODOT" --headless --path . --import                          # after adding, removing or renaming a `class_name`, so the global class cache matches the files (a stale cache hides a missing class_name from the parse check and the suite until the editor reopens; `_test_class_registry` compares them)
 ```
 
-All scene transitions go through the `SceneTransition` autoload (`ui/scene_transition.gd`) via `SceneTransition.fade_to("res://...")`.
+Verified on 4.7.2: the suite reports `Results: 2663 passed, 0 failed` with no `SCRIPT ERROR`. The exit code only reflects `FAIL`: a runtime error aborts the test function it happens in and later assertions silently never run, so **any `SCRIPT ERROR` line is a failure**. Run the quick check after each edit and the full suite before saying a change works. `--check-only` on one file reports "Identifier not found" for any script that names an autoload (`SceneTransition`, `InputDevice`…) because autoloads are not registered in that mode; use the whole-project check for those.
 
-### Autoloads (project.godot)
+## Layout
 
-| Name | File | Purpose |
-|------|------|---------|
-| `SceneTransition` | `ui/scene_transition.gd` | Fade-to transitions |
-| `GameTheme` | `ui/game_theme.gd` | Global UI Theme resource |
-| `VfxManager` | `vfx/core/vfx_manager.gd` | Pooled VFX spawner — `VfxManager.spawn(type, pos, dir)` |
-| `HitStop` | `vfx/components/hit_stop.gd` | Frame-freeze hit-stop effect |
-| `SfxManager` | `vfx/components/sfx_manager.gd` | Sound playback |
+| Folder | Contents |
+|---|---|
+| `battle/` | `BattleScene` (orchestrator), `BattleState` (rules), `BattleArea` (isometric rendering), `AreaShape` (D&D 2024 area shapes, pure), `MapGenerator`, `SurfaceType`, `StatusDefinitions` |
+| `battle/ui/` | HUD panels, all built in code |
+| `actions/` | `ActionData` base + `attacks/`, `skills/`, `spells/`, `endturn/`, `tactical/`, `reactions/` |
+| `heroes/`, `enemies/`, `items/` | `HeroData` (8 heroes), `EnemyData` (7 enemies), `WeaponData` subclasses |
+| `dungeon/` | `DungeonState` (run/floor graph, save), `EventData`, `MysteryRegistry` |
+| `ui/` | Menus, party select, dungeon map (`ui/map/`), event scene, autoload scripts |
+| `tiles/` | `TerrainTile`, terrain object layer |
+| `vfx/` | `core/` (VfxManager, VFXEvent), `components/` (shake, floaters, hit stop, SFX…), `effects/` (.tscn), `shaders/` |
+| `input/` | Gamepad support: `InputDevice` autoload plus pure logic (`InputDeviceTracker`, `InputRumble`, `InputGlyphs`, `InputBindings`). See [docs/architecture/input.md](docs/architecture/input.md) |
+| `tests/run_tests.gd` | The only test file |
+| `docs/` | Design specs, plans, vision, architecture reference (see below) |
 
-### Global State (static vars, not autoloads)
+## Scenes and flow
 
-`BattleState` uses static class-level vars that persist across scenes:
-- `BattleState.PLAYERS` — Array of combat Dictionaries for the party (hp, mp, stats…)
-- `BattleState.TURN_QUEUE` — ordered Array of all combatants (players + enemies)
-- `BattleState.ALL_HERO_DATA` — Dictionary of `HeroData` resources keyed by hero name
-- `BattleState.ALL_ENEMIES` — Dictionary of `EnemyData` resources keyed by enemy type key
+The five `.tscn` scenes each hold **a single root node with a script**; the whole node tree is built in code from `_ready()`. The only content-heavy scenes are the VFX effects in `vfx/effects/`.
 
-`DungeonState.current_run` is a static var holding the active `DungeonState` instance. It is `null` when no run is active (e.g., quick-battle from main menu without going through the dungeon).
-
-Call `BattleState.setup_party(hero_names)` before entering a run to populate `PLAYERS` and `TURN_QUEUE`. Call `BattleState.setup_enemies_for_room(room_type)` before each battle to swap in the correct enemies. Call `BattleState.reset_players()` to restore party HP/MP to base values.
-
-### Battle System
-
-`BattleScene` (`battle/battle_scene.gd`, extends `Control`):
-- Orchestrates the entire battle — builds the full node tree in code from `_ready()` (no layout in .tscn)
-- Holds `_animating: bool` — blocks all input while move/attack/death animations play
-- Connects signals from `ActionPanel`, `BattleArea`, `PauseMenu`, `BattleResultScreen`
-
-`BattleState` (`battle/battle_state.gd`, extends `RefCounted`):
-- All combat logic; zero rendering. Owns the state machine (`State` enum: `PLAYER_TURN`, `ENEMY_TURN`, `MOVE_MODE`, `ATTACK_MODE`)
-- `advance_turn()` handles poison ticks, stun skips, buff decrements, then loads the next combatant's actions
-- `_apply_attack()` rolls damage with proficiency + attribute modifier + status bonuses (furtivo, fury, crit) plus per-action smite dice (`smite_dice_count`/`smite_dice_sides` on `ActionData`)
-- Enemy AI lives in `_pick_enemy_action_idx()`, `get_enemy_move_path()`, `apply_enemy_attack()`
-
-`BattleArea` (`battle/battle_area.gd`):
-- Isometric rendering of the tile grid and combatant sprites
-- Delegates to sub-components: `CombatantLayer` (sprites, HP bars), `FloaterManager` (damage numbers), `CameraShake`, `ScreenFlash`
-
-`MapGenerator` (`battle/map_generator.gd`):
-- Procedural map via border erosion + flood-fill connectivity check; retries up to 100× then falls back to flat map
-- Fixed-seed generation is deterministic (`generate(seed_val)`)
-
-### Battle UI Sub-system (`battle/ui/`)
-
-All UI nodes are built entirely in code — no `.tscn` layout files in this folder.
-
-**HUD layout** (constructed in `BattleScene._build_hud()`):
-```
-VBoxContainer (full screen)
-├─ TurnOrderBar          (top bar)
-├─ BattleArea            (expands to fill height)
-└─ HBoxContainer  HUD_HEIGHT = 200
-   ├─ StatusPanel        STATUS_WIDTH = 280
-   ├─ ActionPanel        SIZE_EXPAND_FILL
-   └─ End Turn Button    80×80, circular StyleBoxFlat, green
-
-Floating (anchored independently, outside the HBox):
-   CombatLogPanel        220×300, bottom-right above HUD, toggled by 💬 button
+```text
+ui/main_menu.tscn ── new run ──> ui/party_select.tscn ──> ui/dungeon_map.tscn ⇄ battle/battle_scene.tscn
+        │                         (or straight to battle)          ⇅
+        └── continue (load save) ──> dungeon_map / battle      ui/event_scene.tscn (EVENT/MYSTERY; may start a battle)
 ```
 
-**Component signal contracts:**
+Every transition goes through `SceneTransition.fade_to("res://...")`.
 
-| Class | Signals emitted | Refresh call |
+## Autoloads
+
+| Name | Script | API |
 |---|---|---|
-| `ActionPanel` | `grid_action_clicked(action)`, `grid_action_hovered(action)`, `end_turn_pressed`, `cancel_action`, `confirm_action` | `refresh()` inside `BattleScene._refresh_ui()` |
-| `TurnOrderBar` | `slot_right_clicked(slot_index, global_pos)` | `refresh(queue, active_index)` |
-| `StatusPanel` | — | `refresh(active_index)` |
-| `CombatLogPanel` | — | `refresh()` reads `BattleState.combat_log` |
-| `ExaminePanel` | — | `show_for(state, idx)` |
-| `ContextMenu` | `examine_requested(slot_index)` | spawned at cursor, calls `queue_free()` on dismiss |
-| `BattleResultScreen` | `continue_requested`, `restart_requested` | `show_result(won, stats)` |
-| `TurnTransitionLayer` | — | `show_turn(title, subtitle, on_done)` |
-| `PauseMenu` | `resume_requested`, `menu_requested` | `show_menu()` / `hide_menu()` |
+| `SceneTransition` | `ui/scene_transition.gd` | `fade_to(scene_path)` |
+| `GameTheme` | `ui/game_theme.gd` | Builds the global `Theme` (pixel font, outline, shadow) on start |
+| `VfxManager` | `vfx/core/vfx_manager.gd` | `spawn(VFXEvent.Type, pos, dir)`, pooled; only types registered in `EFFECT_SCENES` render |
+| `HitStop` | `vfx/components/hit_stop.gd` | `trigger_light/medium/heavy/death()` |
+| `SfxManager` | `vfx/components/sfx_manager.gd` | `play(bank, pos)` over `SFX_BANKS` |
+| `InputDevice` | `input/input_device.gd` | `active_device`, `is_gamepad()`, `cursor_axis()`, `camera_axis()`, `is_los_held()`, `rumble(kind)`; bridges the gamepad to keys |
 
-Every panel receives `setup(state)` during `BattleScene._initialize_state()`, then is refreshed on each state change via `_refresh_ui()`.
+These six scripts (and `tests/run_tests.gd`) have no `class_name`; every other script declares one.
 
-#### ActionPanel internals
+## Global state (static vars, not autoloads)
 
-The grid is 14 columns (`GRID_COLS = 14`) split by a draggable red divider:
-- **Left side** (default 7 cols): normal actions — `bonus_action == false`, `spell_slot_level == 0`, `ki_cost == 0`, not `END_TURN`
-- **Right side** (default 7 cols): spells, skills, END_TURN — `bonus_action == true`, `spell_slot_level > 0`, `ki_cost > 0`, or `END_TURN`
+- `BattleState.ALL_HERO_DATA` / `ALL_ENEMIES`: one instance of each `HeroData` / `EnemyData` subclass, keyed by name or type.
+- `BattleState.PLAYERS`: party combat Dictionaries built by `HeroData.to_combat_dict()`. `BattleState.TURN_QUEUE`: all combatants. `TAB_ITEMS`: consumable item Dictionaries.
+- `DungeonState.current_run`: the active run, or `null` for a quick battle without a dungeon.
+- Save: `DungeonState.save()` writes `DungeonState.SAVE_PATH` (temp file + rename) with `"version": SAVE_VERSION`. A save without the field is legacy v0 and loads as before; a higher version is `SaveStatus.NEWER` (not loaded, file untouched); a malformed one is `CORRUPT` and the menu moves it to `*.corrupt.json` instead of deleting it. Changing the format means bumping `SAVE_VERSION`, migrating in `_read_save` and adding a test. Tests never touch the player save (see Commands).
 
-Within-side drag reorders slots (stored in `_left_order` / `_right_order` label arrays, applied each `refresh()`). Cross-side drag records the override in `_side_overrides: Dictionary` (action label → `"left"/"right"`), which persists across refreshes but resets when `ActionPanel` is recreated. The lock button (`🔒/🔓`) sets `_grid_locked` to prevent accidental reorders.
+Who calls what:
+- `setup_party(names)`: party select / main menu (continue).
+- `setup_enemies_for_room(room_type)`: `BattleScene._ready()`, using the current room (BATTLE when there's no run).
+- `reset_players()`: when a run ends; it restores HP, spell slots, Ki and resource pools.
 
-**State-driven visibility** (`_update_visibility()` driven by `BattleState.current_state`):
-- `PLAYER_TURN` → grid, resource bar, and items bar are visible
-- `MOVE_MODE` / `ATTACK_MODE` / `ENEMY_TURN` → grid hidden; action bar overlay replaces it with a status message and Voltar button
+`BattleState.setup()` consumes `DungeonState.pending_buffs`.
 
-`_filter_mode` (0 = none, 1 = Action only, 2 = Bonus only) is toggled by clicking the Action dot or Bonus arrow resource indicators above the grid, and resets to 0 whenever the grid is hidden.
+## Resources (data model)
 
-#### Right-click examine flow
+Content is defined **in code**: each hero, enemy, action and weapon is a GDScript subclass of a `Resource` base that sets its fields in `_init()`. There are no `.tres` data files for content; the only `.tres` files are `SpriteFrames` animations (`assets/sprites/**`, `vfx/effects/**`).
 
-`TurnOrderBar.slot_right_clicked` → `BattleScene` spawns `ContextMenu` at cursor → `ContextMenu.examine_requested` → `BattleScene` calls `ExaminePanel.show_for(state, idx)`. `ExaminePanel` shows stats, statuses, resistances, and passives; arrow buttons rotate the sprite preview across 4 isometric angles.
+- `ActionData`: cost (`spell_slot_level`, `ki_cost`, `bonus_action`, `pool_key`), targeting (including the area shape: `area_kind`, `area_size_ft`), damage dice/attribute/type, and **generic effect fields** (saving throw, `applies_condition`, `creates_surface`, concentration, revive…). `BattleState` handles these fields, so most new abilities need data only.
+- `HeroData`: stats, `actions`, `skills`, `reactions`, `weapon`, aura, and `caster_type` + `level` → D&D 2024 spell slots (`get_spell_slots_max()`; the table currently stops at level 12, see "Pending rules" in `docs/architecture/battle.md`). There is no MP: spells use slots, the Monk uses Ki (`ki_per_level × level`).
+- `EnemyData`: stats, resistances, and the AI's actions (`action_pool`, `action_behaviors`).
 
-#### Combat log protocol
+## Signals
 
-`BattleState._log(text, type)` prepends to `combat_log: Array` (capped at 60). `CombatLogPanel` renders the latest 25 entries. Valid type keys and colors:
+Signals are only used **from child to parent** inside the battle UI and VFX: panels emit, and `BattleScene` connects in `_build_hud()` / `_initialize_state()`. `BattleState` emits nothing; `BattleScene` calls it and then reads its results (`last_attack_info`, floater queues) and calls `_refresh_ui()`. The full signal table is in [docs/architecture/battle.md](docs/architecture/battle.md#battle-ui-battleui).
 
-| type | color |
-|------|-------|
-| `"dmg"` | red |
-| `"heal"` | green |
-| `"miss"` | tan |
-| `"status"` | purple |
-| `"crit"` | gold |
-| `"system"` | gray (default) |
+## Code conventions
 
-### Actions System
+- **Logic and rendering are separate:** `BattleState` (RefCounted) never touches nodes. `BattleScene` orchestrates, sets `_animating` to block input during animations, and calls `_refresh_ui()` after every state change.
+- **Combatants are identified by their index in `TURN_QUEUE`.** Find players in `PLAYERS` by name with `_player_index_by_name()` / `get_active_player_index()`; never assume the indexes line up.
+- `combatant_statuses[idx]` (parallel to `TURN_QUEUE`) holds both visible conditions and internal keys (`reaction_used`, `disengage`, `death_saves_*`…). HUD display data (name, color, description) lives **only** in `StatusDefinitions.REGISTRY`/`ORDER`.
+- `last_attack_info` is ephemeral, read by `BattleScene` right after each attack.
+- `combat_log` entries use `_log(text, type)` with type `dmg`, `heal`, `miss`, `status`, `crit` or `system`.
+- Resistances, vulnerabilities and immunities are stored as strings of `ActionData.DamageType` names (`"FIRE"`).
+- Rolls go through `DiceRoller` (global RNG), so tests make them deterministic with `seed()` / `_find_seed_for_d20()`.
+- When you add a field to `HeroData`, also add it to `to_combat_dict()`.
+- Settings: only through `GameSettings` (`load_settings`, `save_settings`, `apply_settings`), never by writing `user://settings.cfg` directly. Tests redirect `GameSettings.PATH` to the sandbox.
+- Input: screens keep reading `KEY_*`; the gamepad is bridged to synthetic keys by `InputDevice`, and battle-only commands are `act_*` actions (`InputBindings`). In combat the grid cursor is `BattleState.cursor_tile` (mouse, stick and D-pad/arrows all write it); validity is checked only on confirm (`get_cursor_feedback`, `apply_cursor_selection`). The action-HUD cursor walks the **visible** grid cells (`ActionPanel.nav_*`, `HudNav`); there is no hidden tab model. Every selected item, on every screen, is marked with the same white 3 px ring: `FocusGlow.make_ring()` / `FocusGlow.attach()`.
+- Files are UTF-8 with LF line endings (`.editorconfig`, `.gitattributes`); GDScript uses tabs.
+- Tests: add to `_run_all()` with `_eq` / `_true`. Tests write saves only under `user://test_sandbox/` (`TEST_SAVE_DIR`) and never name the real save file. A top-level test function must end with `_reached.append("<name>")` and be listed in `EXPECTED_TO_FINISH`, so a runtime error that aborts it fails the suite. The `_battlefield()` fixture has fixed positions (Guerreiro (2,3), Goblin Scout (9,1)…) that the movement and AI tests depend on.
 
-`ActionData` (`actions/action_data.gd`, extends `Resource`) is the base for all player actions:
-- `action_type`: `ATTACK | MOVE | END_TURN`
-- `damage_attribute`: `NONE | STR | DEX | INT | WIS` — determines which stat modifier applies
-- `spell_slot_level` (0 = no slot/cantrip; 1-6 = D&D 5e spell slot level consumed), `ki_cost` (Monk-only), `pp` / `max_pp`, `aoe_radius`, `attack_range`, `targets_allies`, `bonus_action`
+## Change policy
 
-Concrete action classes live in `actions/attacks/`, `actions/skills/`, `actions/spells/`, `actions/endturn/`. Each is a plain GDScript class that `extends ActionData` and sets its fields in `_init()`.
+- Small, testable, reversible changes. No refactors outside the requested scope.
+- Reuse existing systems (generic `ActionData` fields, `StatusDefinitions`, `SurfaceType`, `DiceRoller`) before adding new ones.
+- Preserve scenes, resources and signals; changing a signal or a save-format field is an architecture decision (see the delegation table).
+- Never commit or push unless the user asks.
 
-`HeroData` (`heroes/hero_data.gd`, extends `Resource`) defines hero stats and carries:
-- `actions: Array[ActionData]` — shown in the ACTION tab
-- `skills: Array[ActionData]` — shown in the HABILIDADES tab
-- `caster_type` (`NONE`/`HALF`/`FULL`) + `level` drive `get_spell_slots_max()` — a D&D 5e lookup (levels 1-12) returning a 6-element array `[1st…6th]`. `ki_per_level` × `level` = `ki_max()` (Monk). No MP system exists; spells consume spell slots (restored on rest), Monk skills consume Ki.
+## Further documentation
 
-Each hero has a concrete `HeroData` subclass in `heroes/` (e.g., `GuerreiroData`, `MagoData`). These are instantiated once in `BattleState.ALL_HERO_DATA`. `BattleState._load_hero_actions(player_name)` duplicates the actions/skills from `ALL_HERO_DATA` into `tab_action` / `tab_habilidades` at the start of each hero's turn.
-
-### Dungeon System
-
-`DungeonState` (`dungeon/dungeon_state.gd`, extends `RefCounted`):
-- Generates a floor graph (`FLOOR_COUNT = 6`): floor 0 is always BATTLE, floor 5 is always BOSS; middle floors are weighted random (BATTLE, ELITE, EVENT, MYSTERY)
-- Persists to `user://dungeon_save.json` via `save()` / `load_save()` / `delete_save()`
-- `pending_buffs` accumulates stat buffs from events; `BattleState.setup()` consumes them
-
-`EventData` (`dungeon/event_data.gd`) and `MysteryRegistry` (`dungeon/mystery_registry.gd`) define the `EventData.REGISTRY` of named events and deterministic mystery resolution.
-
-### VFX System
-
-`VfxManager` uses object pooling. To spawn an effect:
-```gdscript
-VfxManager.spawn(VFXEvent.Type.SLASH_LIGHT, global_position, rotation)
-```
-
-Registered effect types: `SLASH_LIGHT`, `IMPACT_LIGHT`, `IMPACT_CRIT`. New effect types require a `.tscn` scene and an entry in `VfxManager.EFFECT_SCENES`.
-
-### Terrain
-
-`TerrainTile` (`tiles/terrain_tile.gd`) holds `ground` (GroundType: NORMAL, MUD, ELEVATED, STONE, GRASS) and `object` (ObjectType: NONE, STATUE, OBSTACLE, COVER) and `effect` (EffectType: NONE, TRAP_INACTIVE, TRAP_ACTIVE).
-
-Movement cost: MUD costs 2, all others cost 1. ELEVATED tiles grant +1 attack range for ranged actions. Additionally, elevation difference applies a flat modifier to the attack roll for ranged actions: attacker elevated, target not → +2; target elevated, attacker not → -2; same level or melee → 0. This is a flat bonus (not Advantage), matching BG3 behavior. COVER tiles have a 30% chance to cause a miss.
-
-### Testing (`tests/run_tests.gd`)
-
-Single 1180-line file extending `SceneTree`. All tests live in `_run_all()`; no separate test files or test classes exist.
-
-**Assertion helpers:** `_eq(label, actual, expected)` and `_true(label, value)`.
-
-**Shared fixture:** `_battlefield()` returns a `BattleState` with combatants at fixed positions (Guerreiro at (2,3), Goblin Scout at (9,1), etc.). Movement and enemy AI tests depend on these coordinates — do not change them without updating dependent cases.
-
-**Coverage by subsystem:** BattleState initial state → Movement (speed, blocking, terrain cost) → Enemy AI (pathfinding, action selection) → MapGenerator (connectivity, determinism) → Terrain effects (traps, mud, cover) → All 8 hero action sequences → Status effects (poison, stun, buff stacking) → DungeonState floor graph + save/load → EventData/MysteryRegistry → UI smoke tests (TurnOrderBar, ExaminePanel, ContextMenu).
-
-To add a test, append to `_run_all()` and use the existing assertion helpers. Run with `godot --headless --script tests/run_tests.gd`.
-
-## Key Conventions
-
-- `BattleScene` is the only file that directly mutates `BattleState` static vars during a battle; `BattleState` methods return data or mutate internal state — they do not call rendering code.
-- Combatants are identified by their index in `TURN_QUEUE`. Player data is looked up separately in `PLAYERS` by name. Always use `_player_index_by_name()` / `get_active_player_index()` rather than assuming index alignment.
-- `combatant_statuses` is an Array parallel to `TURN_QUEUE`, where each element is a Dictionary of active status effects (keys: `"poison"`, `"stun"`, `"raging"`, `"fury"`, `"furtivo"`).
-- `last_attack_info` Dictionary is set by `_apply_attack()` / `apply_enemy_attack()` and read by `BattleScene` immediately after to trigger floaters and hit-flash — it is ephemeral per-attack.
-- Save data path: `user://dungeon_save.json`. Settings path: `user://settings.cfg`. `GameSettings` (`game_settings.gd`) is the static-only class that owns settings — call `GameSettings.load_settings()`, `save_settings(dict)`, `apply_settings(dict)` (sets window mode/vsync/size). Do not write `settings.cfg` directly.
+- [docs/architecture/battle.md](docs/architecture/battle.md): combat rules, surfaces, reactions, terrain, `ActionData` fields, UI and signals, VFX.
+- `docs/superpowers/specs/` and `docs/superpowers/plans/`: designs and plans for past features (dated; the code may have changed since).
+- `docs/vision/dungeon-run-longa.md`: planned vision for long runs (not implemented).
+- `README.md` is out of date (it lists 4 heroes and an old file layout).
 
 ## Team Workflow & Prompt Convention
 
@@ -210,14 +127,42 @@ This project follows a team model:
 - **Developer (Claude Code + user):** writes and edits code.
 - **Consultant (Cowork assistant):** analyzes code, writes documentation, and creates prompts for Claude Code.
 
-When a prompt arrives from the Cowork assistant it will follow this structure:
-1. **Context** — game reference (BG3 90%, D&D 5e 10%), session scope
-2. **Expected deliverable** — what to produce (plan only, or plan + implementation)
-3. **Problems** — each item describes *what the current behavior is* and *what the correct behavior should be* (BG3/D&D reference), without dictating specific code changes
-4. **Constraints** — what must not break, what already works, known dependencies
+Prompts from the consultant follow this structure:
+1. **Context**: game reference (BG3 for combat, D&D 2024 for characters), session scope
+2. **Expected deliverable**: plan only, or plan + implementation
+3. **Problems**: current behavior vs. correct behavior (BG3 or D&D 2024 reference, as `game-rules.md` assigns), without dictating code
+4. **Constraints**: what must not break, known dependencies
 
-**Your job as Claude Code:** read the codebase, locate the relevant code, plan (and implement if the session scope says so). The consultant describes *what*, you decide *how*.
+The consultant describes *what*; Claude Code decides *how*. **Session scope is always explicit**: if it says "plan only", produce a structured plan and do not modify files. Prompts may open with a Superpowers directive naming the target skill (e.g. `writing-plans`, `systematic-debugging`); still judge whether the spec is complete enough or whether a clarifying question is needed first.
 
-**Session scope is always declared explicitly in the prompt.** If it says "plan only", produce a structured plan and do not modify any files.
+## Agent skills
 
-**Superpowers plugin is installed.** Prompts from the consultant will include a Superpowers directive at the top declaring which skill to use as the target (e.g., `writing-plans`, `systematic-debugging`, `subagent-driven-development`). The consultant provides a detailed spec, but you should still use your own judgment on whether the spec is complete enough to proceed directly to planning, or whether a clarifying question is warranted first.
+### Issue tracker
+
+Issues live in GitHub Issues for `Lucas-AV/Dungeon-Descend-Godot-Prototype`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default triage labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), each label string equal to its role. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` plus `docs/adr/`, both created lazily. See `docs/agents/domain.md`.
+
+### Delegation (subagents)
+
+This section is the standing instruction that allows subagents and sets their model/effort. Default: **do the work inline.** Delegate only when it keeps a large amount of reading or test output out of the main context, or when the task needs a different model tier. Never delegate a one-file read, a single grep, or an edit you can make directly. Who plans and who optimizes (Superpowers, Ponytail, AutoMode) is in `.claude/rules/workflow.md`.
+
+| Need | Agent | Model / effort |
+|---|---|---|
+| Symbol lookup, "who calls X" (provisional) | `codebase-memory-scout` | haiku / low |
+| Broad search across many files | `Explore` (built-in) | built-in default |
+| Verified call-graph / impact answer | `codebase-memory` | sonnet / medium |
+| Bounded audit of a subsystem | `codebase-memory-auditor` | opus / high |
+| Bounded GDScript change with a full spec + tests | `godot-implementer` | sonnet / medium |
+| Complex multi-system bug, or one a first fix didn't solve | `godot-debugger` | opus / high |
+| Critical, hard-to-reverse architecture decision | `architecture-advisor` | fable / high |
+
+- Do not use the built-in `Plan` agent or the agents above as a second planning flow. Inside `subagent-driven-development`, map tasks to haiku/low (mechanical, 1-2 files), sonnet/medium (integration), opus/high (design judgment and reviews of risky changes).
+- The `automode:*` agents belong to AutoMode's own pipeline (off here); for project work use the agents above.
+- Pass `model`/`effort` on the Agent call only to override an agent's frontmatter, e.g. escalate a failed sonnet task to opus.

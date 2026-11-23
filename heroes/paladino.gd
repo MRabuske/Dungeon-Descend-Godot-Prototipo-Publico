@@ -12,7 +12,6 @@ func _init() -> void:
 	max_hp       = 110
 	caster_type  = CasterType.HALF
 	ac           = 16
-	initiative   = 6
 	speed        = 6
 	proficiency  = 3
 	strength     = 16
@@ -23,7 +22,7 @@ func _init() -> void:
 	charisma     = 16
 	save_proficiencies = ["WIS", "CHA"]
 	damage_reduction = 0
-	weapon = HeroData.make_weapon("Longsword", 1, 8, ActionData.DamageAttribute.STR, false, 10)
+	weapon = HeroData.make_weapon("Longsword", 1, 8, ActionData.DamageAttribute.STR, false, 10, ActionData.DamageType.SLASHING)
 	actions = [AtqDivino.new(), AcaoMover.new()]
 	skills  = [SkillSmite.new(), SkillCuraMaos.new()]
 	reactions = [ReactionDivineSmite.new()]

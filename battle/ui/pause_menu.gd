@@ -98,19 +98,15 @@ func _build_panel() -> void:
 	_add_separator(vbox)
 	_build_buttons(vbox)
 
-	var hint := Label.new()
-	hint.text = "↑ ↓ Navegar   ·   ENTER Selecionar   ·   ESC Retomar"
-	hint.add_theme_font_size_override("font_size", 10)
-	hint.add_theme_color_override("font_color", Color(0.55, 0.55, 0.62))
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.anchor_left   = 0.0
-	hint.anchor_right  = 1.0
-	hint.anchor_top    = 1.0
-	hint.anchor_bottom = 1.0
-	hint.offset_top    = -32.0
-	hint.offset_bottom = -8.0
-	hint.mouse_filter  = Control.MOUSE_FILTER_IGNORE
-	add_child(hint)
+	_hint_bar = HintBar.attach_bottom(self, [[&"navigate", "Navegar"], [&"confirm", "Selecionar"],
+		[&"pause", "Retomar"], [&"back", "Retomar"]])
+
+var _hint_bar: HintBar
+
+# As Opções têm as próprias dicas: não sobrepor as duas barras.
+func _process(_dt: float) -> void:
+	if _hint_bar != null and _options != null:
+		_hint_bar.visible = not _options.visible
 
 # ======================================================
 # BUILD — TITLE

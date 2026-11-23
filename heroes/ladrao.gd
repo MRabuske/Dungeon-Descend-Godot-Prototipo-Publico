@@ -11,7 +11,6 @@ func _init() -> void:
 	base_hp      = 55
 	max_hp       = 100
 	ac           = 13
-	initiative   = 9
 	speed        = 9
 	proficiency  = 3
 	strength     = 10
@@ -22,7 +21,7 @@ func _init() -> void:
 	charisma     = 15
 	save_proficiencies = ["DEX", "INT"]
 
-	weapon = HeroData.make_weapon("Shortsword", 1, 6, ActionData.DamageAttribute.DEX, true)
+	weapon = HeroData.make_weapon("Shortsword", 1, 6, ActionData.DamageAttribute.DEX, true, 0, ActionData.DamageType.PIERCING)
 	var an := AtqNormal.new()
 	an.damage_attribute = ActionData.DamageAttribute.DEX
 	actions = [an, AtqRapido.new(), AcaoMover.new()]

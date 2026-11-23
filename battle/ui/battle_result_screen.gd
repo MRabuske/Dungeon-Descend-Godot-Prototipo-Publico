@@ -107,6 +107,7 @@ func _ready() -> void:
 
 	_build_overlay()
 	_build_frame()
+	HintBar.attach_bottom(self, [[&"confirm", "Continuar"]])
 
 func _build_overlay() -> void:
 	var overlay := ColorRect.new()
@@ -192,6 +193,7 @@ func _build_frame() -> void:
 
 	# Instanciação inicial do botão para controle de fluxo
 	_action_btn = TextureButton.new()
+	FocusGlow.attach(_action_btn)
 	btn_margin.add_child(_action_btn)
 
 func _create_absolute_divider() -> Control:
@@ -331,6 +333,7 @@ func show_result(result: String, stats: Dictionary) -> void:
 	_update_action_button(is_win)
 
 	visible              = true
+	_action_btn.grab_focus()
 	modulate.a            = 0.0
 	_frame_rect.scale    = Vector2(0.92, 0.92)
 	_frame_rect.pivot_offset = _frame_rect.custom_minimum_size * 0.5
@@ -440,7 +443,8 @@ func _update_action_button(is_win: bool) -> void:
 
 	# Limpa labels antigos para evitar duplicação em reuso da tela
 	for child in _action_btn.get_children():
-		child.queue_free()
+		if child is Label:   # o anel de foco (FocusGlow) é filho do botão e permanece
+			child.queue_free()
 
 	var lbl := Label.new()
 	lbl.text = label

@@ -19,6 +19,8 @@ const HEAL_TARGET_COLOR    := Color(0.20, 1.0, 0.40, 0.30)
 const HEAL_CURSOR_FILL     := Color(0.25, 1.0, 0.45, 0.30)
 const HEAL_CURSOR_BORDER   := Color(0.30, 1.0, 0.50, 0.90)
 const LOS_RED              := Color(1.0, 0.15, 0.15, 0.22)
+const INVALID_CURSOR_FILL   := Color(0.95, 0.20, 0.18, 0.30)
+const INVALID_CURSOR_BORDER := Color(1.0, 0.35, 0.30, 0.90)
 const JUMP_ARC_COLOR       := Color(0.5, 0.9, 1.0, 0.9)
 const JUMP_LAND_COLOR      := Color(0.5, 0.9, 1.0, 0.5)
 const JUMP_AREA_COLOR      := Color(0.5, 0.9, 1.0, 0.12)
@@ -60,6 +62,12 @@ const PAN_DRAG_THRESHOLD := 6.0
 
 var _hovered_grid: Vector2i = Vector2i(-1, -1)
 
+# Cursor livre do analógico (coordenadas locais). Nunca usa warp_mouse: o warp geraria
+# evento de mouse e devolveria o jogo ao dispositivo teclado/mouse.
+var pointer_pos: Vector2 = Vector2.ZERO
+# Combatente em exame (índice de TURN_QUEUE, -1 = nenhum): borda branca no tile dele.
+var _examine_idx: int = -1
+
 # Hit-chance hover preview (shown in ATTACK_MODE over a valid target)
 # Element A — minimal over-sprite preview: action icon + hit %.
 var _hit_preview: Control = null
@@ -70,6 +78,9 @@ var _hit_preview_target: int = -1
 
 # Aviso de Ataque de Oportunidade (mostrado em MOVE_MODE sobre o tile de destino).
 var _oa_warn_lbl: Label = null
+# Motivo do quadrado inválido sob o cursor ("Fora de alcance", "Sem alvo"…). É um Label
+# (e não draw_string) para ficar acima dos sprites do grid.
+var _invalid_lbl: Label = null
 
 var _zoom: float = 1.0
 const ZOOM_MIN := 0.45
@@ -262,6 +273,8 @@ func setup(state: BattleState) -> void:
 	_combatant_layer.update_all_combatant_ui(_state)
 	
 	mouse_exited.connect(func() -> void:
+		if InputDevice.is_gamepad():
+			return   # com o controle ativo o mouse oculto não manda no cursor
 		_hovered_grid = Vector2i(-1, -1)
 		tile_hovered.emit(Vector2i(-1, -1))
 		_update_hit_preview()
@@ -269,6 +282,7 @@ func setup(state: BattleState) -> void:
 	)
 	_build_hit_preview_panel()
 	_build_oa_warn_label()
+	_build_invalid_label()
 	_initialize_void_effects()
 	call_deferred("_initial_sync")
 
@@ -283,6 +297,7 @@ func inject_vfx_references(cam_shake: CameraShake, scr_flash: ScreenFlash) -> vo
 
 func _process(delta: float) -> void:
 	_pulse_time += delta * 1.8
+	_process_gamepad(delta)
 	for effect in _void_effects.values():
 		effect.update(delta)
 	if not _first_frame_synced and _combatant_layer.get_child_count() > 0:
@@ -296,9 +311,113 @@ func _process(delta: float) -> void:
 	# Esconde o aviso de OA fora do MOVE_MODE e fora da mira do Pulo (ATTACK_MODE).
 	if _oa_warn_lbl != null and _oa_warn_lbl.visible:
 		var in_jump := _state != null and _state.current_state == BattleState.State.ATTACK_MODE \
-			and _state._current_action is AcaoPular
+			and _state.get_current_action() is AcaoPular
 		if _state == null or (_state.current_state != BattleState.State.MOVE_MODE and not in_jump):
 			_oa_warn_lbl.visible = false
+	queue_redraw()
+
+# ── Controle: câmera, cursor livre e cursor por quadrado ─────────────────────
+func _process_gamepad(delta: float) -> void:
+	if _state == null or not InputDevice.is_gamepad():
+		return
+	# Analógico direito: câmera, com o mesmo clamp do arrasto do mouse.
+	var cam: Vector2 = InputDevice.camera_axis()
+	if cam != Vector2.ZERO:
+		_pan_offset = (_pan_offset - cam * BattleCamera.STICK_PAN_SPEED * delta).clamp(
+			Vector2(-MAX_PAN, -MAX_PAN), Vector2(MAX_PAN, MAX_PAN))
+	if not InputDevice.stick_drives_cursor:
+		return
+	# Analógico esquerdo: cursor livre (equivale ao mouse). Na faixa de borda a câmera rola.
+	var axis: Vector2 = InputDevice.cursor_axis()
+	if axis != Vector2.ZERO:
+		pointer_pos = (pointer_pos + axis * BattleCamera.POINTER_SPEED * delta).clamp(Vector2.ZERO, size)
+		_pan_by(BattleCamera.edge_pan_velocity(pointer_pos, size,
+			BattleCamera.EDGE_MARGIN, axis, BattleCamera.EDGE_PAN_SPEED) * delta)
+	if axis != Vector2.ZERO or cam != Vector2.ZERO:
+		var gp := _pointer_cell(pointer_pos)
+		if gp != _hovered_grid:
+			_hovered_grid = gp
+			tile_hovered.emit(gp)
+			_update_hit_preview()
+		queue_redraw()
+
+# Rola a câmera só se ainda há mapa além da borda da tela naquela direção.
+func _pan_by(delta_pan: Vector2) -> void:
+	if delta_pan == Vector2.ZERO:
+		return
+	var allowed := BattleCamera.can_pan(_map_screen_rect(), size, delta_pan)
+	_pan_offset = (_pan_offset + allowed).clamp(Vector2(-MAX_PAN, -MAX_PAN), Vector2(MAX_PAN, MAX_PAN))
+
+# Retângulo do mapa isométrico em coordenadas de tela (com zoom e pan aplicados).
+func _map_screen_rect() -> Rect2:
+	var cols: int = _state.grid_cols
+	var rows: int = _state.grid_rows
+	var off := _get_offset()
+	var world := Rect2(off.x - rows * TILE_HALF_W, off.y,
+		(cols + rows) * TILE_HALF_W, (cols + rows) * TILE_HALF_H)
+	var t: Vector2 = size * 0.5 * (1.0 - _zoom) + _pan_offset
+	return Rect2(world.position * _zoom + t, world.size * _zoom)
+
+# Posição de tela do centro de um tile (com zoom e pan).
+func _tile_screen_pos(gp: Vector2i) -> Vector2:
+	var world: Vector2 = _corner_canvas_pos(gp, _get_offset()) if _corner_aim_active() \
+		else _tile_center(gp.x, gp.y, _get_offset())
+	return world * _zoom + size * 0.5 * (1.0 - _zoom) + _pan_offset
+
+# Mira em cruzamento (esfera/cilindro): o cursor vive nos cantos das casas (0..cols, 0..rows).
+func _corner_aim_active() -> bool:
+	return _state != null and _state.current_state == BattleState.State.ATTACK_MODE and _state.attack_corner_mode
+
+# Posição de canvas do cruzamento (x, y): o vértice superior-esquerdo da casa (x, y). O centro da
+# casa (c, r) é (c, r) no mapa isométrico, então o canto fica meia casa antes em cada eixo.
+func _corner_canvas_pos(corner: Vector2i, offset: Vector2) -> Vector2:
+	return _tile_center_f(corner.x - 0.5, corner.y - 0.5, offset)
+
+# Célula sob o ponteiro: o cruzamento mais próximo (mira de esfera) ou a casa.
+func _pointer_cell(screen_pos: Vector2) -> Vector2i:
+	if _corner_aim_active():
+		var g: Vector2 = _screen_to_grid_f(screen_pos)
+		return Vector2i(int(round(g.x + 0.5)), int(round(g.y + 0.5)))
+	return _screen_to_grid(screen_pos)
+
+func _cell_in_bounds(gp: Vector2i) -> bool:
+	var extra: int = 1 if _corner_aim_active() else 0
+	return gp.x >= 0 and gp.x < _state.grid_cols + extra and gp.y >= 0 and gp.y < _state.grid_rows + extra
+
+# D-pad/setas: leva o ponteiro ao quadrado do cursor e rola a câmera o mínimo para ele
+# ficar visível. Não emite tile_hovered: quem chama já atualizou o BattleState.
+func snap_pointer_to_tile(gp: Vector2i) -> void:
+	if _state == null:
+		return
+	_hovered_grid = gp
+	var p := _tile_screen_pos(gp)
+	var margin := BattleCamera.EDGE_MARGIN
+	var shift := Vector2.ZERO
+	if p.x < margin:
+		shift.x = margin - p.x
+	elif p.x > size.x - margin:
+		shift.x = (size.x - margin) - p.x
+	if p.y < margin:
+		shift.y = margin - p.y
+	elif p.y > size.y - margin:
+		shift.y = (size.y - margin) - p.y
+	_pan_by(shift)
+	pointer_pos = _tile_screen_pos(gp)
+	_update_hit_preview()
+	queue_redraw()
+
+# Redesenha cursor e prévia sem mexer na câmera (o cursor mudou por mouse/modo).
+func refresh_cursor_visuals() -> void:
+	_update_hit_preview()
+	queue_redraw()
+
+func cycle_zoom() -> void:
+	_zoom = BattleCamera.next_zoom(_zoom)
+	_update_hit_preview()
+	queue_redraw()
+
+func set_examine_highlight(combatant_idx: int) -> void:
+	_examine_idx = combatant_idx
 	queue_redraw()
 
 # Element A — minimal preview floating over the enemy sprite: just the action
@@ -349,6 +468,19 @@ func _build_hit_preview_panel() -> void:
 
 	add_child(_hit_preview)
 
+func _build_invalid_label() -> void:
+	if _invalid_lbl != null:
+		return
+	_invalid_lbl = Label.new()
+	_invalid_lbl.visible = false
+	_invalid_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_invalid_lbl.z_index = 100
+	_invalid_lbl.add_theme_font_size_override("font_size", 12)
+	_invalid_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.35))
+	_invalid_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
+	_invalid_lbl.add_theme_constant_override("outline_size", 4)
+	add_child(_invalid_lbl)
+
 func _build_oa_warn_label() -> void:
 	if _oa_warn_lbl != null:
 		return
@@ -376,10 +508,10 @@ func _update_hit_preview() -> void:
 	# Find a living combatant under the hovered tile that is a valid attack target.
 	var cidx := -1
 	for i in range(_state.TURN_QUEUE.size()):
-		if _state.combatant_positions[i] == _hovered_grid and not _state.dead_indices.has(i):
+		if _state.combatant_positions[i] == _state.cursor_tile and not _state.dead_indices.has(i):
 			cidx = i
 			break
-	if cidx < 0 or not _state.attack_target_indices.has(cidx):
+	if cidx < 0 or _state.attack_corner_mode or not _state.attack_target_indices.has(cidx):
 		_hit_preview.visible = false
 		_set_hover_target(-1)
 		return
@@ -394,13 +526,9 @@ func _update_hit_preview() -> void:
 
 	# Hit chance + Advantage/Disadvantage (BG3 style)
 	var chance := _state.calc_hit_chance(cidx)
-	var pidx := _state.get_active_player_index()
-	var adv := 0
-	var dis := 0
-	if pidx >= 0:
-		var rm: Dictionary = _state.get_attack_roll_mods(pidx, cidx, _state.current_attack_range)
-		adv = int(rm.get("adv", 0))
-		dis = int(rm.get("dis", 0))
+	var rm: Dictionary = _state.get_active_attack_roll_mods(cidx)
+	var adv := int(rm.get("adv", 0))
+	var dis := int(rm.get("dis", 0))
 
 	if chance >= 1.0:
 		_hit_chance_lbl.text = "100%"
@@ -425,7 +553,7 @@ func _update_hit_preview() -> void:
 	# Position above the hovered tile, accounting for zoom/pan transform.
 	_hit_preview.visible = true
 	_hit_preview.reset_size()
-	var canvas_pos := _tile_center_f(_hovered_grid.x, _hovered_grid.y, _get_offset())
+	var canvas_pos := _tile_center_f(_state.cursor_tile.x, _state.cursor_tile.y, _get_offset())
 	var pivot: Vector2 = size * 0.5
 	var translate: Vector2 = pivot * (1.0 - _zoom) + _pan_offset
 	var screen_pos: Vector2 = canvas_pos * _zoom + translate
@@ -464,9 +592,8 @@ func _gui_input(event: InputEvent) -> void:
 					_pan_start_offset = _pan_offset
 				else:
 					if _is_panning and not _left_dragged and _state != null:
-						var gp := _screen_to_grid(mb.position)
-						if gp.x >= 0 and gp.x < _state.grid_cols \
-						and gp.y >= 0 and gp.y < _state.grid_rows:
+						var gp := _pointer_cell(mb.position)
+						if _cell_in_bounds(gp):
 							tile_clicked.emit(gp)
 					_is_panning = false
 					_left_dragged = false
@@ -484,7 +611,7 @@ func _gui_input(event: InputEvent) -> void:
 				Vector2(-MAX_PAN, -MAX_PAN), Vector2(MAX_PAN, MAX_PAN))
 			queue_redraw()
 		else:
-			var gp := _screen_to_grid(motion.position)
+			var gp := _pointer_cell(motion.position)
 			if gp != _hovered_grid:
 				_hovered_grid = gp
 				tile_hovered.emit(gp)
@@ -492,7 +619,7 @@ func _gui_input(event: InputEvent) -> void:
 				queue_redraw()
 			# No modo Pulo, o aviso "Pulo impossível" acompanha o mouse em tempo real.
 			elif _state != null and _state.current_state == BattleState.State.ATTACK_MODE \
-					and _state._current_action is AcaoPular:
+					and _state.get_current_action() is AcaoPular:
 				queue_redraw()
 
 func refresh(active_index: int) -> void:
@@ -604,8 +731,11 @@ func animate_ranged_attack(attacker_idx: int, target_grid: Vector2i, action: Act
 func animate_aoe_attack(attacker_idx: int, target_grid: Vector2i, action: ActionData, on_done: Callable) -> void:
 	print("animate_aoe_attack chamado | impact_type: ", action.impact_type, " | aoe_cascade_type: ", action.aoe_cascade_type)
 	var offset := _get_offset()
-	var target_pos := _tile_center_f(target_grid.x, target_grid.y, offset)
-	var radius := action.aoe_radius
+	# O centro e as casas vêm da MESMA pegada que o efeito aplicou (BattleState.last_area_*); o centro
+	# está em coordenadas do motor (casa (c, r) = [c, c+1] × [r, r+1]); no mapa isométrico o centro da
+	# casa (c, r) é (c, r), então desloca meia casa.
+	var center_grid: Vector2 = _state.last_area_center - Vector2(0.5, 0.5)
+	var target_pos := _tile_center_f(center_grid.x, center_grid.y, offset)
 	var is_ranged := action.attack_range > 1
 	var proj_color := action.proj_color
 
@@ -617,14 +747,10 @@ func animate_aoe_attack(attacker_idx: int, target_grid: Vector2i, action: Action
 	)
 
 	var aoe_tiles: Array[Vector2i] = []
-	for dx in range(-radius, radius + 1):
-		for dy in range(-radius, radius + 1):
-			if maxi(absi(dx), absi(dy)) <= radius:
-				var tile_pos := Vector2i(target_grid.x + dx, target_grid.y + dy)
-				if tile_pos.x >= 0 and tile_pos.x < _state.grid_cols and tile_pos.y >= 0 and tile_pos.y < _state.grid_rows:
-					var t: TerrainTile = _state.tile_data_map[tile_pos.x][tile_pos.y]
-					if not t.is_void() and t.object != TerrainTile.ObjectType.OBSTACLE:
-						aoe_tiles.append(tile_pos)
+	for tile_pos in _state.last_area_tiles:
+		var t: TerrainTile = _state.tile_data_map[tile_pos.x][tile_pos.y]
+		if t.object != TerrainTile.ObjectType.OBSTACLE:
+			aoe_tiles.append(tile_pos)
 
 	var do_explosion := func() -> void:
 		
@@ -636,7 +762,7 @@ func animate_aoe_attack(attacker_idx: int, target_grid: Vector2i, action: Action
 			else:
 				SfxManager.play_impact_heavy(target_pos)
 		_apply_aoe_cascade(aoe_tiles, offset, target_pos, action.impact_type, action)
-		_aoe_blast = {"pos": target_grid, "radius": radius, "color": proj_color, "alpha": 1.0}
+		_aoe_blast = {"tiles": aoe_tiles, "center": center_grid, "color": proj_color, "alpha": 1.0}
 		queue_redraw()
 		var fade_tween := create_tween()
 		fade_tween.tween_method(
@@ -682,7 +808,7 @@ func animate_aoe_attack(attacker_idx: int, target_grid: Vector2i, action: Action
 		tween.tween_callback(func(): proj.queue_free(); do_explosion.call())
 	else:
 		var origin: Vector2 = _visual_positions[attacker_idx]
-		var lunge: Vector2 = origin.lerp(Vector2(target_grid), 0.30)
+		var lunge: Vector2 = origin.lerp(center_grid, 0.30)
 		var tween := create_tween()
 		tween.tween_method(
 			func(v: Vector2): _visual_positions[attacker_idx] = v; queue_redraw(),
@@ -721,25 +847,22 @@ func _apply_aoe_cascade(tiles: Array[Vector2i], offset: Vector2, epicenter: Vect
 func _draw_aoe_blast(offset: Vector2) -> void:
 	if _state == null:
 		return
-	var center_pos: Vector2i = _aoe_blast["pos"]
-	var radius: int = _aoe_blast["radius"]
+	var tiles: Array = _aoe_blast["tiles"]
+	var center_grid: Vector2 = _aoe_blast["center"]
 	var col: Color = _aoe_blast["color"]
 	var alpha: float = _aoe_blast["alpha"]
-	for c in range(_state.grid_cols):
-		for r in range(_state.grid_rows):
-			var d: int = maxi(absi(c - center_pos.x), absi(r - center_pos.y))
-			if d > radius:
-				continue
-			var t: TerrainTile = _state.tile_data_map[c][r]
-			if t.is_void() or t.object == TerrainTile.ObjectType.OBSTACLE:
-				continue
-			var falloff := 1.0 - float(d) / float(radius + 1)
-			var fill := Color(col.r, col.g, col.b, alpha * falloff * 0.72)
-			draw_polygon(_tile_diamond(c, r, offset), PackedColorArray([fill]))
-			if d == 0:
-				var ring := Color(1.0, 1.0, 1.0, alpha * 0.55)
-				var pts := _tile_diamond(c, r, offset)
-				draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]), ring, 2.0)
+	var max_d := 0.0
+	for t in tiles:
+		max_d = maxf(max_d, (Vector2(t) - center_grid).length())
+	for t in tiles:
+		var d: float = (Vector2(t) - center_grid).length()
+		var falloff: float = 1.0 - d / (max_d + 1.0)
+		var fill := Color(col.r, col.g, col.b, alpha * falloff * 0.72)
+		var pts := _tile_diamond(t.x, t.y, offset)
+		draw_polygon(pts, PackedColorArray([fill]))
+		if d < 0.75:
+			var ring := Color(1.0, 1.0, 1.0, alpha * 0.55)
+			draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]), ring, 2.0)
 
 func animate_attack(attacker_idx: int, target_grid: Vector2i, on_done: Callable, is_crit: bool = false) -> void:
 	var target_pos := _tile_center_f(target_grid.x, target_grid.y, _get_offset())
@@ -882,13 +1005,18 @@ func start_death_animation(idx: int) -> void:
 		if node:
 			node.visible = false
 	, death_dir)
-func _screen_to_grid(screen_pos: Vector2) -> Vector2i:
+# Coordenadas de grid em ponto flutuante sob um ponto de tela: o centro da casa (c, r) é (c, r).
+func _screen_to_grid_f(screen_pos: Vector2) -> Vector2:
 	var pivot := size * 0.5
 	var world := (screen_pos - (pivot * (1.0 - _zoom) + _pan_offset)) / _zoom
 	var off := _get_offset()
 	var dx := (world.x - off.x) / TILE_HALF_W
 	var dy := (world.y - off.y - TILE_HALF_H) / TILE_HALF_H
-	return Vector2i(int(round((dx + dy) / 2.0)), int(round((dy - dx) / 2.0)))
+	return Vector2((dx + dy) / 2.0, (dy - dx) / 2.0)
+
+func _screen_to_grid(screen_pos: Vector2) -> Vector2i:
+	var g := _screen_to_grid_f(screen_pos)
+	return Vector2i(int(round(g.x)), int(round(g.y)))
 
 func _get_offset() -> Vector2:
 	var cols: int = _state.grid_cols if _state != null else 12
@@ -951,6 +1079,7 @@ func _draw() -> void:
 	
 	_draw_hover_highlight(offset)
 	_draw_active_highlight(offset)
+	_draw_examine_highlight(offset)
 	
 	if _state != null and _state.current_state == BattleState.State.MOVE_MODE:
 		_draw_reachable_tiles(offset)
@@ -958,13 +1087,13 @@ func _draw() -> void:
 		_draw_move_cursor(offset)
 	
 	if _state != null and _state.current_state == BattleState.State.ATTACK_MODE:
-		if _state._current_action is AcaoPular:
+		if _state.get_current_action() is AcaoPular:
 			_draw_jump_landing(offset)
 			_draw_jump_arc(offset)
 		else:
 			_draw_attack_area(offset)
 			_draw_attack_cursor(offset)
-			if _state.current_aoe_radius > 0:
+			if _state.current_has_area():
 				_draw_aoe_splash(offset)
 	
 	if _spawn_markers_visible:
@@ -974,15 +1103,26 @@ func _draw() -> void:
 
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
-	# Aviso "Pulo impossível" perto do cursor (espaço de tela, após reset de transform).
-	if _state != null and _state.current_state == BattleState.State.ATTACK_MODE \
-			and _state._current_action is AcaoPular \
-			and not _state.is_valid_jump_landing(_state.active_index, _hovered_grid):
-		var f := get_theme_default_font()
-		var fs := get_theme_default_font_size()
-		var at := get_local_mouse_position() + Vector2(14, -10)
-		draw_string(f, at + Vector2(1, 1), "Pulo impossível", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.8))
-		draw_string(f, at, "Pulo impossível", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.4, 0.35))
+	# Aviso de quadrado inválido ("Impossível movimentar até aqui", "Fora de alcance",
+	# "Pulo impossível"…) junto ao tile do cursor (espaço de tela, após reset de transform).
+	var show_invalid := false
+	if _state != null and (_state.current_state == BattleState.State.MOVE_MODE \
+			or _state.current_state == BattleState.State.ATTACK_MODE):
+		var fb: Dictionary = _state.get_cursor_feedback()
+		if not fb["valid"] and fb["reason"] != "":
+			show_invalid = true
+			_invalid_lbl.text = fb["reason"]
+			_invalid_lbl.reset_size()
+			var at := _tile_screen_pos(_state.cursor_tile) + Vector2(14, -40)
+			at.x = clampf(at.x, 6.0, maxf(6.0, size.x - _invalid_lbl.size.x - 6.0))
+			at.y = clampf(at.y, 4.0, maxf(4.0, size.y - _invalid_lbl.size.y - 4.0))
+			_invalid_lbl.position = at
+	if _invalid_lbl != null:
+		_invalid_lbl.visible = show_invalid
+	# Mira do cursor livre do analógico.
+	if InputDevice.is_gamepad() and InputDevice.stick_drives_cursor:
+		draw_arc(pointer_pos, 7.0, 0.0, TAU, 20, Color(1, 1, 1, 0.9), 1.5)
+		draw_circle(pointer_pos, 2.0, Color(1, 1, 1, 0.9))
 
 func _draw_surfaces(offset: Vector2) -> void:
 	if _state == null:
@@ -1107,34 +1247,50 @@ func _draw_hover_highlight(offset: Vector2) -> void:
 	draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]),
 		Color(1.0, 1.0, 1.0, 0.28), 1.5)
 
+# Ponto em coordenadas de canvas do mapa → posição de tela deste Control. O mapa é desenhado sob
+# draw_set_transform(zoom, pan), mas os Labels filhos NÃO passam por essa transformação: uma posição
+# de mundo atribuída a um Label só coincide com a casa em zoom 1 e pan 0.
+func _canvas_to_screen(p: Vector2) -> Vector2:
+	return p * _zoom + size * 0.5 * (1.0 - _zoom) + _pan_offset
+
+# Mostra "⚠ Ataque de Oportunidade!" acima da casa `tile`, na posição de TELA certa para qualquer zoom
+# e pan, e sempre dentro da área visível.
+func _place_oa_warning(tile: Vector2i, offset: Vector2) -> void:
+	if _oa_warn_lbl == null:
+		return
+	_oa_warn_lbl.reset_size()
+	var anchor: Vector2 = _canvas_to_screen(_tile_center(tile.x, tile.y, offset))
+	var pos: Vector2 = anchor - Vector2(_oa_warn_lbl.size.x * 0.5, _oa_warn_lbl.size.y + 26.0)
+	pos.x = clampf(pos.x, 4.0, maxf(4.0, size.x - _oa_warn_lbl.size.x - 4.0))
+	pos.y = clampf(pos.y, 4.0, maxf(4.0, size.y - _oa_warn_lbl.size.y - 4.0))
+	_oa_warn_lbl.position = pos
+	_oa_warn_lbl.visible = true
+
 func _draw_move_path(offset: Vector2) -> void:
 	if _state == null:
 		return
-	# Preview de trajeto: a linha segue a tile sob o mouse enquanto ela for
-	# alcancavel. Se o mouse nao estiver sobre uma tile valida (ex.: navegacao
-	# por teclado), cai de volta para o cursor de movimento.
-	var target: Vector2i = _state.move_cursor
-	if _hovered_grid.x >= 0 and _state.get_reachable_tiles().has(_hovered_grid):
-		target = _hovered_grid
+	# Preview de trajeto: a linha segue o cursor (mouse, analógico ou D-pad) enquanto
+	# ele estiver num tile alcançável; num inválido não há linha (o aviso vem do texto).
+	var target: Vector2i = _state.cursor_tile
+	var reachable: Dictionary = _state.get_reachable_tiles()
 	# Aviso preemptivo de Ataque de Oportunidade (BG3): se mover o personagem
 	# para o tile hovereado o tiraria do alcance corpo-a-corpo de um inimigo
 	# com reação, marca o destino em laranja e mostra um aviso. Não bloqueia.
 	var mover := _state.active_index
 	var cur_pos: Vector2i = _state.combatant_positions[mover]
 	var provokes := false
-	if _hovered_grid.x >= 0 and _hovered_grid != cur_pos and _state.get_reachable_tiles().has(_hovered_grid):
-		provokes = not _state.check_opportunity_attacks(mover, cur_pos, _hovered_grid).is_empty()
+	if target != cur_pos and reachable.has(target):
+		provokes = not _state.check_opportunity_attacks_along(mover, cur_pos, _state.get_path_to(target)).is_empty()
 	if provokes:
 		var warn_pts := _tile_diamond(target.x, target.y, offset)
 		draw_polygon(warn_pts, PackedColorArray([Color(1.0, 0.45, 0.10, 0.30)]))
 		draw_polyline(PackedVector2Array([warn_pts[0], warn_pts[1], warn_pts[2], warn_pts[3], warn_pts[0]]),
 			Color(1.0, 0.55, 0.15, 0.95), 2.0)
-		var warn_center := _tile_center(target.x, target.y, offset)
-		_oa_warn_lbl.reset_size()
-		_oa_warn_lbl.position = warn_center - Vector2(_oa_warn_lbl.size.x * 0.5, _oa_warn_lbl.size.y + 26.0)
-		_oa_warn_lbl.visible = true
+		_place_oa_warning(target, offset)
 	else:
 		_oa_warn_lbl.visible = false
+	if not reachable.has(target):
+		return
 	var path: Array[Vector2i] = _state.get_path_to(target)
 	if path.is_empty():
 		return
@@ -1196,7 +1352,7 @@ func _draw_jump_landing(offset: Vector2) -> void:
 # Prévia do Pulo: arco (parábola) do ativo até o tile sob o mouse, só se o pouso
 # for válido (is_valid_jump_landing). Sem realce de área — só a trajetória.
 func _draw_jump_arc(offset: Vector2) -> void:
-	var dest: Vector2i = _hovered_grid
+	var dest: Vector2i = _state.cursor_tile
 	if _state == null or not _state.is_valid_jump_landing(_state.active_index, dest):
 		if _oa_warn_lbl != null:
 			_oa_warn_lbl.visible = false
@@ -1213,30 +1369,43 @@ func _draw_jump_arc(offset: Vector2) -> void:
 	draw_polyline(pts, JUMP_ARC_COLOR, 2.5)
 	# Aviso de Ataque de Oportunidade (igual ao movimento): pular para fora do
 	# alcance corpo-a-corpo de um inimigo com reação provoca OA.
-	var provokes := not _state.check_opportunity_attacks(_state.active_index, src, dest).is_empty()
+	# Mesma chamada que a cena usa ao executar o Pulo: o salto é um passo único até `dest`.
+	var provokes := not _state.check_opportunity_attacks_along(_state.active_index, src, [dest] as Array[Vector2i]).is_empty()
 	var di := _tile_diamond(dest.x, dest.y, offset)
 	if provokes:
 		draw_polygon(di, PackedColorArray([Color(1.0, 0.45, 0.10, 0.30)]))
 		draw_polyline(PackedVector2Array([di[0], di[1], di[2], di[3], di[0]]),
 			Color(1.0, 0.55, 0.15, 0.95), 2.0)
-		if _oa_warn_lbl != null:
-			var warn_center := _tile_center(dest.x, dest.y, offset)
-			_oa_warn_lbl.reset_size()
-			_oa_warn_lbl.position = warn_center - Vector2(_oa_warn_lbl.size.x * 0.5, _oa_warn_lbl.size.y + 26.0)
-			_oa_warn_lbl.visible = true
+		_place_oa_warning(dest, offset)
 	else:
 		draw_polyline(PackedVector2Array([di[0], di[1], di[2], di[3], di[0]]), JUMP_LAND_COLOR, 2.0)
 		if _oa_warn_lbl != null:
 			_oa_warn_lbl.visible = false
 
 func _draw_move_cursor(offset: Vector2) -> void:
-	var pos: Vector2i = _state.move_cursor
+	var pos: Vector2i = _state.cursor_tile
+	if not _cursor_in_grid(pos):
+		return
+	var valid: bool = _state.get_cursor_feedback()["valid"]
 	var pts := _tile_diamond(pos.x, pos.y, offset)
-	draw_polygon(pts, PackedColorArray([MOVE_CURSOR_FILL]))
+	draw_polygon(pts, PackedColorArray([MOVE_CURSOR_FILL if valid else INVALID_CURSOR_FILL]))
 	draw_polyline(
 		PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]),
-		MOVE_CURSOR_BORDER, 2.0
+		MOVE_CURSOR_BORDER if valid else INVALID_CURSOR_BORDER, 2.0
 	)
+
+func _cursor_in_grid(pos: Vector2i) -> bool:
+	return _cell_in_bounds(pos)
+
+# Borda branca no tile do combatente em exame (Y/Tab); espelha a borda do slot na barra.
+func _draw_examine_highlight(offset: Vector2) -> void:
+	if _state == null or _examine_idx < 0 or _examine_idx >= _state.combatant_positions.size():
+		return
+	if _state.dead_indices.has(_examine_idx):
+		return
+	var pos: Vector2i = _state.combatant_positions[_examine_idx]
+	var pts := _tile_diamond(pos.x, pos.y, offset)
+	draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]), Color.WHITE, 3.0)
 
 func _draw_attack_area(offset: Vector2) -> void:
 	var heal_mode: bool = _state._attack_targets_allies
@@ -1250,34 +1419,35 @@ func _draw_attack_area(offset: Vector2) -> void:
 		draw_polygon(_tile_diamond(pos.x, pos.y, offset), PackedColorArray([fill]))
 
 func _draw_aoe_splash(offset: Vector2) -> void:
-	# Em mira de AoE em tile, o cursor é um ponto livre (pode não haver criatura).
-	if _state.attack_target_indices.is_empty() and not _state.attack_tile_mode:
-		return
-	var cursor_pos: Vector2i = _state.get_attack_cursor_pos()
-	var radius: int = _state.current_aoe_radius
+	# A prévia é EXATAMENTE a pegada que o efeito vai usar (BattleState.area_footprint) e só aparece
+	# com o cursor num ponto válido (confirmável).
 	var splash_color := Color(1.0, 0.55, 0.10, 0.22)
 	var splash_border := Color(1.0, 0.65, 0.20, 0.70)
-	for col in range(_state.grid_cols):
-		for row in range(_state.grid_rows):
-			var d: int = maxi(absi(col - cursor_pos.x), absi(row - cursor_pos.y))
-			if d > 0 and d <= radius:
-				var t: TerrainTile = _state.tile_data_map[col][row]
-				if t.is_void():
-					continue
-				if t.object == TerrainTile.ObjectType.OBSTACLE:
-					continue
-				var pts := _tile_diamond(col, row, offset)
-				draw_polygon(pts, PackedColorArray([splash_color]))
-				draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]),
-					splash_border, 1.5)
+	for t in _state.get_area_preview_tiles():
+		var pts := _tile_diamond(t.x, t.y, offset)
+		draw_polygon(pts, PackedColorArray([splash_color]))
+		draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]),
+			splash_border, 1.5)
 
 func _draw_attack_cursor(offset: Vector2) -> void:
-	if _state.attack_target_indices.is_empty() and not _state.attack_tile_mode:
+	var pos: Vector2i = _state.cursor_tile
+	if not _cursor_in_grid(pos):
 		return
 	var heal_mode: bool = _state._attack_targets_allies
+	var valid: bool = _state.get_cursor_feedback()["valid"]
 	var cursor_fill: Color = HEAL_CURSOR_FILL if heal_mode else ATTACK_CURSOR_FILL
 	var cursor_border: Color = HEAL_CURSOR_BORDER if heal_mode else ATTACK_CURSOR_BORDER
-	var pos: Vector2i = _state.get_attack_cursor_pos()
+	if not valid:
+		cursor_fill = INVALID_CURSOR_FILL
+		cursor_border = INVALID_CURSOR_BORDER
+	if _state.attack_corner_mode:
+		# Mira em cruzamento: o cursor é um alvo (círculo + cruz) sobre o vértice entre quatro casas.
+		var c := _corner_canvas_pos(pos, offset)
+		draw_circle(c, 6.0, cursor_fill)
+		draw_arc(c, 6.0, 0.0, TAU, 24, cursor_border, 2.0)
+		draw_line(c - Vector2(11.0, 0.0), c + Vector2(11.0, 0.0), cursor_border, 1.5)
+		draw_line(c - Vector2(0.0, 7.0), c + Vector2(0.0, 7.0), cursor_border, 1.5)
+		return
 	var pts := _tile_diamond(pos.x, pos.y, offset)
 	draw_polygon(pts, PackedColorArray([cursor_fill]))
 	draw_polyline(

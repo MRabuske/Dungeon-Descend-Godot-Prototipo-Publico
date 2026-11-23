@@ -8,11 +8,12 @@ func _init() -> void:
 	color_idx        = COLOR_SPELL
 	attack_range     = 8
 	proj_color       = Color(0.90, 0.85, 0.20)
-	aoe_radius       = 2
+	area_kind        = AreaShape.Kind.SPHERE
+	area_size_ft     = 10
 	aoe_cascade_delay = 0.08
 	aoe_instant = true
 	damage_attribute = DamageAttribute.INT
-	damage_type      = DamageType.THUNDER
+	damage_type      = DamageType.LIGHTNING
 	damage_dice_count = 2
 	damage_dice_sides = 6
 	pp               = 6
@@ -26,3 +27,4 @@ func _init() -> void:
 	save_attribute        = DamageAttribute.DEX
 	# Trovão eletrifica Água existente (ver _deposit_surface_after_attack).
 	creates_surface       = SurfaceType.Type.ELECTRIFIED_WATER
+	is_spell         = true

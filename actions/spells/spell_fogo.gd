@@ -7,7 +7,8 @@ func _init() -> void:
 	shape              = SHAPE_HEXAGON
 	color_idx          = COLOR_SPELL
 	attack_range       = 10
-	aoe_radius         = 1
+	area_kind        = AreaShape.Kind.SPHERE
+	area_size_ft     = 5
 	proj_color         = Color(1.0, 0.45, 0.10)
 	damage_attribute   = DamageAttribute.INT
 	damage_type        = DamageType.FIRE
@@ -27,3 +28,4 @@ func _init() -> void:
 	requires_saving_throw = true
 	save_attribute        = DamageAttribute.DEX
 	creates_surface       = SurfaceType.Type.FIRE
+	is_spell         = true

@@ -9,7 +9,7 @@ func _init() -> void:
 	action_type       = Type.ATTACK
 	shape             = SHAPE_CIRCLE
 	color_idx         = COLOR_ITEM
-	attack_range      = 2
+	attack_range      = 1   # adjacente, diagonal incluída (Q9; o BG3 dá 2 m, que não é número inteiro de casas)
 	targets_allies    = true
 	bonus_action      = false
 	revives_downed    = true

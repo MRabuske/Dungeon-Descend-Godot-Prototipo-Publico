@@ -2,6 +2,8 @@ class_name TurnOrderBar
 extends Control
 
 signal slot_right_clicked(slot_index: int, global_mouse_pos: Vector2)
+## Clique esquerdo num slot (índice da fila): a cena troca para esse herói se ele é do turno compartilhado.
+signal slot_clicked(slot_index: int)
 
 # ======================================================
 # 🎨 ASSETS
@@ -35,6 +37,8 @@ const SLOT_SIZE      := 52
 const SLOT_GAP       := 30
 const FONT_INITNUM   := 10
 const INACTIVE_ALPHA := 0.55
+const SIDE_ALLY_COLOR  := Color(0.35, 0.60, 1.00)   # moldura dos heróis
+const SIDE_ENEMY_COLOR := Color(0.90, 0.30, 0.30)   # moldura dos inimigos
 # ──────────────────────────────────────────────────────
 
 # ======================================================
@@ -46,6 +50,9 @@ var _margin_container: MarginContainer
 
 # Set during refresh() so _build_slot() can read live enemy HP from the active battle.
 var _state_ref: BattleState = null
+var _last_queue: Array = []
+var _last_active: int = 0
+var _examine_idx: int = -1
 
 const HP_BAR_HEIGHT := 6.0
 const HP_NUM_FONT_SIZE := 9
@@ -93,6 +100,8 @@ func _build_panel() -> void:
 # ======================================================
 func refresh(queue: Array, active_index: int, state: BattleState = null) -> void:
 	_state_ref = state
+	_last_queue = queue
+	_last_active = active_index
 	for child in _hbox.get_children():
 		_hbox.remove_child(child)
 		child.queue_free()
@@ -104,12 +113,29 @@ func refresh(queue: Array, active_index: int, state: BattleState = null) -> void
 	for i in queue.size():
 		if state != null and state.dead_indices.has(i):
 			continue
-		_hbox.add_child(_build_slot(queue[i], i == active_index, i))
+		var slot: Control = _build_slot(queue[i], i == active_index, i)
+		_hbox.add_child(slot)
 		n += 1
 
 	var final_width: int = n * SLOT_SIZE + max(0, n - 1) * SLOT_GAP + MARGIN_BAR_LEFT + MARGIN_BAR_RIGHT
 	custom_minimum_size.x = final_width
 	size.x = final_width
+
+# Combatente em exame (índice de TURN_QUEUE; -1 = nenhum): ganha a borda branca. Refaz
+# a barra com os últimos dados para a borda aparecer na hora.
+func set_examine_highlight(queue_idx: int) -> void:
+	if queue_idx == _examine_idx:
+		return
+	_examine_idx = queue_idx
+	if not _last_queue.is_empty():
+		refresh(_last_queue, _last_active, _state_ref)
+
+# Retângulo global do slot de um combatente (para ancorar o menu de contexto).
+func get_slot_global_rect(queue_idx: int) -> Rect2:
+	for child in _hbox.get_children():
+		if child is Control and child.get_meta("queue_index", -1) == queue_idx:
+			return (child as Control).get_global_rect()
+	return Rect2(global_position, Vector2.ZERO)
 
 # ======================================================
 # BUILD — SLOT
@@ -121,7 +147,7 @@ func _build_slot(combatant: Dictionary, is_active: bool, slot_index: int) -> Con
 	root.custom_minimum_size = Vector2(SLOT_SIZE, SLOT_SIZE)
 	root.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
-	if not is_active:
+	if not is_active and slot_index != _examine_idx:
 		root.modulate.a = INACTIVE_ALPHA
 
 	# 1. CAMADA DE TRÁS: MarginContainer para o Retrato (Aplica as margens internas na área útil)
@@ -176,6 +202,30 @@ func _build_slot(combatant: Dictionary, is_active: bool, slot_index: int) -> Con
 	
 	slot_tex_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(slot_tex_rect)
+
+	# Aliado × inimigo pela cor da moldura: azul para os heróis, vermelho para os inimigos (visual
+	# provisório, a arte será trocada).
+	var side_frame := Panel.new()
+	var side_box := StyleBoxFlat.new()
+	side_box.bg_color = Color(0, 0, 0, 0)
+	side_box.set_border_width_all(2)
+	side_box.border_color = SIDE_ALLY_COLOR if combatant["is_player"] else SIDE_ENEMY_COLOR
+	side_frame.add_theme_stylebox_override("panel", side_box)
+	side_frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	side_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(side_frame)
+
+	# Herói que já encerrou o turno neste bloco: retrato escurecido e um "FIM" discreto no canto.
+	# (A bg3.wiki não descreve como o BG3 sinaliza isso; marca simples e provisória.)
+	if _state_ref != null and _state_ref.is_member_ended(slot_index):
+		portrait_node.modulate = Color(0.45, 0.45, 0.5)
+		var ended_lbl := Label.new()
+		ended_lbl.text = "FIM"
+		ended_lbl.add_theme_font_size_override("font_size", 7)
+		ended_lbl.modulate = Color(1, 1, 1, 0.85)
+		ended_lbl.position = Vector2(3.0, 3.0)
+		ended_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(ended_lbl)
 
 	# 3. OVERLAY ABSOLUTO: Número de iniciativa
 	var num_lbl := Label.new()
@@ -272,6 +322,10 @@ func _build_slot(combatant: Dictionary, is_active: bool, slot_index: int) -> Con
 			ds_row.add_child(dot)
 		root.add_child(ds_row)
 
+	# Exame (Y/Tab): borda branca no retrato selecionado.
+	if slot_index == _examine_idx:
+		root.add_child(FocusGlow.make_ring(false))   # o exame também é aberto com o mouse
+
 	root.mouse_filter = Control.MOUSE_FILTER_PASS
 
 	# Store the real TURN_QUEUE index so right-click examine resolves the correct
@@ -288,6 +342,8 @@ func _build_slot(combatant: Dictionary, is_active: bool, slot_index: int) -> Con
 # BattleState (_state_ref) and max HP from EnemyData. Falls back to a full bar
 # when no state is available (e.g. UI smoke tests).
 func _hp_values(combatant: Dictionary, slot_index: int) -> Vector2i:
+	if _state_ref != null:
+		return Vector2i(_state_ref.get_hp(slot_index), maxi(1, _state_ref.get_max_hp(slot_index)))
 	var cur := 0
 	var mx := 1
 	if combatant.get("is_player", false):
@@ -296,16 +352,11 @@ func _hp_values(combatant: Dictionary, slot_index: int) -> Vector2i:
 				cur = int(player.get("hp", 0))
 				mx  = int(player.get("max_hp", 1))
 				break
-	else:
-		var nm: String = combatant.get("name", "")
-		if _state_ref != null:
-			cur = int(_state_ref.enemy_hp.get(nm, 0))
-			mx  = maxi(1, _state_ref.get_enemy_max_hp(slot_index))
-		else:
-			var etype: String = combatant.get("type", "")
-			if BattleState.ALL_ENEMIES.has(etype):
-				mx  = int(BattleState.ALL_ENEMIES[etype].max_hp)
-				cur = mx
+	else:   # sem estado (smoke tests de UI): barra cheia pelo EnemyData
+		var etype: String = combatant.get("type", "")
+		if BattleState.ALL_ENEMIES.has(etype):
+			mx  = int(BattleState.ALL_ENEMIES[etype].max_hp)
+			cur = mx
 	return Vector2i(cur, maxi(mx, 1))
 
 # Returns the combatant's current HP as a fraction [0,1].
@@ -327,7 +378,7 @@ func _on_hbox_gui_input(event: InputEvent) -> void:
 	if not (event is InputEventMouseButton):
 		return
 	var mb := event as InputEventMouseButton
-	if mb.button_index != MOUSE_BUTTON_RIGHT or not mb.pressed:
+	if not mb.pressed or (mb.button_index != MOUSE_BUTTON_RIGHT and mb.button_index != MOUSE_BUTTON_LEFT):
 		return
 	for i in _hbox.get_child_count():
 		var child := _hbox.get_child(i) as Control
@@ -335,7 +386,10 @@ func _on_hbox_gui_input(event: InputEvent) -> void:
 			continue
 		if child.get_global_rect().has_point(mb.global_position):
 			var queue_idx: int = child.get_meta("queue_index", i)
-			slot_right_clicked.emit(queue_idx, mb.global_position)
+			if mb.button_index == MOUSE_BUTTON_RIGHT:
+				slot_right_clicked.emit(queue_idx, mb.global_position)
+			else:
+				slot_clicked.emit(queue_idx)   # turno compartilhado: passa o controle a este herói
 			get_viewport().set_input_as_handled()
 			return
 
@@ -357,6 +411,4 @@ func _get_combatant_portrait(combatant: Dictionary) -> Texture2D:
 				var portrait = enemy_data.to_combat_dict().get("portrait")
 				if portrait and portrait is Texture2D:
 					return portrait
-			elif enemy_data.has("portrait"):
-				return enemy_data.portrait
 	return null

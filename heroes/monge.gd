@@ -12,7 +12,6 @@ func _init() -> void:
 	max_hp       = 90
 	ki_per_level = 1
 	ac           = 14
-	initiative   = 11
 	speed        = 10
 	proficiency  = 3
 	strength     = 12

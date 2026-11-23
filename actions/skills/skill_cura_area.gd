@@ -7,7 +7,9 @@ func _init() -> void:
 	shape            = SHAPE_HEXAGON
 	color_idx        = COLOR_SPELL
 	attack_range     = 1
-	aoe_radius       = 1
+	area_kind        = AreaShape.Kind.EMANATION
+	area_size_ft     = 5
+	area_includes_origin = true
 	proj_color       = Color(0.30, 1.00, 0.50)
 	targets_allies   = true
 	damage_attribute = DamageAttribute.WIS

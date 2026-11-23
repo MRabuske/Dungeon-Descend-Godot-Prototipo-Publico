@@ -149,10 +149,6 @@ var _fog_reveal_y: float = 0.0
 # READY
 # ======================================================
 func _ready() -> void:
-	print("=== DungeonMapScreen _ready ===")
-	print("BattleState.PLAYERS size: ", BattleState.PLAYERS.size())
-	for p in BattleState.PLAYERS:
-		print("Player: ", p.get("name", "?"), " - HP: ", p.get("hp", 0))
 	anchor_right  = 1.0
 	anchor_bottom = 1.0
 
@@ -398,13 +394,9 @@ func _build_bottom_bar() -> void:
 	_add_texture_button(bar, "Voltar ao Menu",
 		BTN_RED_NORMAL, BTN_RED_HOVER, BTN_RED_PRESSED, _on_back_to_menu)
 
-	var hint := Label.new()
-	hint.text = "← → Selecionar sala   ·   ENTER Entrar   ·   ESC Deselecionar"
-	hint.add_theme_font_size_override("font_size", 10)
-	hint.add_theme_color_override("font_color", Color(0.45, 0.45, 0.50))
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var hint := HintBar.new()
 	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hint.set_hints([[&"navigate", "Selecionar sala"], [&"confirm", "Entrar"], [&"back", "Deselecionar"]])
 	bar.add_child(hint)
 
 # ======================================================

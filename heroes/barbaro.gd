@@ -11,7 +11,6 @@ func _init() -> void:
 	base_hp          = 95
 	max_hp           = 120
 	ac               = 12
-	initiative       = 7
 	speed            = 6
 	proficiency      = 3
 	strength         = 20
@@ -23,6 +22,6 @@ func _init() -> void:
 	save_proficiencies = ["STR", "CON"]
 	damage_reduction = 1
 
-	weapon = HeroData.make_weapon("Greataxe", 1, 12, ActionData.DamageAttribute.STR)
+	weapon = HeroData.make_weapon("Greataxe", 1, 12, ActionData.DamageAttribute.STR, false, 0, ActionData.DamageType.SLASHING)
 	actions = [AtqNormal.new(), AtqPesado.new(), AcaoMover.new()]
 	skills  = []

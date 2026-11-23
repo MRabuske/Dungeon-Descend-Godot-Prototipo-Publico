@@ -59,10 +59,13 @@ func _build() -> void:
 	lbl.add_theme_constant_override("shadow_offset_y", 1)
 	btn.add_child(lbl)
 
-	btn.pressed.connect(func() -> void:
-		examine_requested.emit(_slot_index)
-		queue_free()
-	)
+	btn.add_child(FocusGlow.make_ring())   # único item do menu: sempre o selecionado
+	btn.pressed.connect(confirm)
+
+# Aciona "Examinar" (clique no botão ou Enter/A conduzido pela BattleScene).
+func confirm() -> void:
+	examine_requested.emit(_slot_index)
+	queue_free()
 
 func show_at(pos: Vector2, slot_index: int) -> void:
 	_slot_index = slot_index

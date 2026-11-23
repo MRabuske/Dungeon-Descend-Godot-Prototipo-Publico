@@ -18,12 +18,15 @@ var _context_label: Label
 var _instruction_label: Label
 var _options_container: VBoxContainer
 var _confirm_btn: Button
+var _decline_btn: Button
 var _panel: PanelContainer
 
 # Opções da rodada atual e seleção (trigger_types selecionados).
 var _options: Array = []
 var _selected: Array = []
 var _option_boxes: Array = []  # Buttons, paralelo a _options
+# Com 2+ opções: linha destacada em [opções..., Confirmar, Não Reagir] (teclado/controle).
+var _cursor: int = 0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -91,11 +94,15 @@ func _build_ui() -> void:
 	_confirm_btn.pressed.connect(_on_confirm)
 	btn_row.add_child(_confirm_btn)
 
-	var decline_btn := Button.new()
-	decline_btn.text = "Não Reagir"
-	decline_btn.custom_minimum_size = Vector2(170, 40)
-	decline_btn.pressed.connect(func() -> void: _resolve([]))
-	btn_row.add_child(decline_btn)
+	_decline_btn = Button.new()
+	_decline_btn.text = "Não Reagir"
+	_decline_btn.custom_minimum_size = Vector2(170, 40)
+	_decline_btn.pressed.connect(func() -> void: _resolve([]))
+	btn_row.add_child(_decline_btn)
+
+	var hints := HintBar.new()
+	vbox.add_child(hints)
+	hints.set_hints([[&"navigate", "Opção"], [&"confirm", "Reagir"], [&"back", "Não reagir"]])
 
 # options: Array[Dictionary] — cada uma { trigger_type, label, cost_text, portrait }.
 # on_done(chosen: Array) recebe a lista de trigger_types escolhidos (vazia = recusou).
@@ -107,6 +114,8 @@ func show_for(context_text: String, options: Array, on_done: Callable) -> void:
 	_rebuild_options()
 	# Com 1 opção não há etapa de confirmação — clicar na caixa usa direto.
 	_confirm_btn.visible = options.size() >= 2
+	_cursor = 0
+	_update_cursor()
 	visible = true
 
 func _rebuild_options() -> void:
@@ -183,12 +192,55 @@ func _input(event: InputEvent) -> void:
 			KEY_ESCAPE:
 				get_viewport().set_input_as_handled()
 				_resolve([])
+			KEY_UP, KEY_W:
+				get_viewport().set_input_as_handled()
+				_move_cursor(-1)
+			KEY_DOWN, KEY_S:
+				get_viewport().set_input_as_handled()
+				_move_cursor(1)
 			KEY_ENTER, KEY_KP_ENTER:
 				get_viewport().set_input_as_handled()
 				if _options.size() == 1:
 					_resolve([str(_options[0].get("trigger_type", ""))])
 				else:
-					_resolve(_selected.duplicate())
+					_activate_cursor()
+
+# 2+ opções: linhas [opção 0..n-1, Confirmar, Não Reagir].
+func _move_cursor(delta: int) -> void:
+	if _options.size() < 2:
+		return
+	_cursor = posmod(_cursor + delta, _options.size() + 2)
+	_update_cursor()
+
+# Enter/A na linha destacada: alterna a opção, confirma ou recusa.
+func _activate_cursor() -> void:
+	if _cursor < _options.size():
+		var box: Button = _option_boxes[_cursor]
+		box.button_pressed = not box.button_pressed   # dispara toggled -> _selected
+	elif _cursor == _options.size():
+		_on_confirm()
+	else:
+		_resolve([])
+
+var _cursor_ring: Panel = null
+
+func _update_cursor() -> void:
+	if _cursor_ring == null:
+		_cursor_ring = FocusGlow.make_ring()
+	var multi: bool = _options.size() >= 2
+	var target: Control = null
+	if multi:
+		if _cursor < _options.size():
+			target = _option_boxes[_cursor]
+		elif _cursor == _options.size():
+			target = _confirm_btn
+		else:
+			target = _decline_btn
+	if _cursor_ring.get_parent() != null and _cursor_ring.get_parent() != target:
+		_cursor_ring.get_parent().remove_child(_cursor_ring)
+	if target != null and _cursor_ring.get_parent() != target:
+		target.add_child(_cursor_ring)
+	_cursor_ring.visible = target != null
 
 func _resolve(chosen: Array) -> void:
 	visible = false

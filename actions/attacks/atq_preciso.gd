@@ -9,7 +9,7 @@ func _init() -> void:
 	attack_range      = 8
 	proj_color        = Color(1.0, 0.95, 0.60)
 	damage_attribute  = DamageAttribute.DEX
-	damage_type       = DamageType.PHYSICAL
+	damage_type       = DamageType.PIERCING
 	is_weapon_attack  = true
 	icon 			  = preload("res://assets/ui/icons/attacks/atq_preciso.png")
 	sfx_cast           = "impact_arrow"

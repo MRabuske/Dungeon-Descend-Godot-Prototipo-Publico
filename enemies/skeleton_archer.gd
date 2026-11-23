@@ -16,6 +16,8 @@ func _init() -> void:
 	damage_dice_count = 1
 	damage_dice_sides = 6
 	attack_damage_attribute = ActionData.DamageAttribute.DEX
+	attack_damage_type      = ActionData.DamageType.PIERCING
+	ranged_weapon           = true
 	level        = 2
 	strength     = 10
 	dexterity    = 14
@@ -28,6 +30,6 @@ func _init() -> void:
 		"Shooting an arrow at %s...",
 	]
 	action_behaviors = [
-		{"range": 5, "damage_mult": 1.0, "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "", "status_chance": 0.0, "buff_type": "", "buff_value": 0, "buff_turns": 0},
-		{"range": 5, "damage_mult": 1.0, "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "", "status_chance": 0.0, "buff_type": "", "buff_value": 0, "buff_turns": 0},
+		{"range": 5, "damage_mult": 1.0, "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "", "status_chance": 0.0, "buff_type": "", "buff_value": 0, "buff_turns": 0},
+		{"range": 5, "damage_mult": 1.0, "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "", "status_chance": 0.0, "buff_type": "", "buff_value": 0, "buff_turns": 0},
 	]

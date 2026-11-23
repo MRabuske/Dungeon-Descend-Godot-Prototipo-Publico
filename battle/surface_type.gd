@@ -12,13 +12,16 @@ enum Type {
 	CLOUD_OF_DAGGERS  = 8,
 }
 
+## Duração de superfície permanente (não conta rodadas): Água.
+const PERMANENT := -1
+
 # Duration in ROUNDS until the surface expires (decremented once per full round,
 # not per individual combatant turn — see advance_turn / _acted_this_round)
 const DURATION: Dictionary = {
 	Type.FIRE:              4,
 	Type.ICE:               3,
-	Type.WATER:             5,
-	Type.ELECTRIFIED_WATER: 3,
+	Type.WATER:             PERMANENT,   # BG3: Água = "Duration: Permanent" (bg3.wiki/wiki/Water)
+	Type.ELECTRIFIED_WATER: 2,           # BG3: "Reverts back to regular water after 2 turns"
 	Type.ACID:              4,
 	Type.POISON:            4,
 	Type.STEAM:             1,

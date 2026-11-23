@@ -8,7 +8,8 @@ func _init() -> void:
 	color_idx        = COLOR_SPELL
 	attack_range     = 8
 	proj_color       = Color(0.40, 0.80, 1.00)
-	aoe_radius       = 1
+	area_kind        = AreaShape.Kind.SPHERE
+	area_size_ft     = 5
 	damage_attribute = DamageAttribute.INT
 	damage_type      = DamageType.COLD
 	damage_dice_count = 2
@@ -24,3 +25,4 @@ func _init() -> void:
 	requires_saving_throw = true
 	save_attribute        = DamageAttribute.DEX
 	creates_surface       = SurfaceType.Type.ICE
+	is_spell         = true

@@ -16,7 +16,11 @@ class RoomNode:
 
 static var current_run: DungeonState = null
 
-const SAVE_PATH   := "user://dungeon_save.json"
+# static var (não const): os testes apontam para um arquivo próprio e não tocam no save real.
+static var SAVE_PATH: String = "user://dungeon_save.json"
+# Formato do save. Mude junto com uma migração em _read_save e um teste. Sem o campo = v0 (legado).
+const SAVE_VERSION := 1
+enum SaveStatus { NONE, VALID, CORRUPT, NEWER, UNREADABLE }
 const FLOOR_COUNT := 6
 const FLOOR_COUNT_MIN := 5
 const FLOOR_COUNT_MAX := 7
@@ -307,6 +311,7 @@ func is_run_complete() -> bool:
 
 func save() -> void:
 	var data: Dictionary = {
+		"version": SAVE_VERSION,
 		"run_seed": run_seed,
 		"floor_count": floor_count,
 		"current_node_id": current_node_id,
@@ -327,37 +332,63 @@ func save() -> void:
 			"pos_x": n.position.x,
 			"pos_y": n.position.y
 		})
-	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	if file:
-		file.store_string(JSON.stringify(data))
-		file.close()
+	# Grava num temporário e só então troca: falha no meio não trunca o save bom.
+	var tmp: String = SAVE_PATH + ".tmp"
+	var file := FileAccess.open(tmp, FileAccess.WRITE)
+	if file == null:
+		push_warning("DungeonState.save: não abriu %s (erro %d)" % [tmp, FileAccess.get_open_error()])
+		return
+	var ok: bool = file.store_string(JSON.stringify(data))
+	file.close()
+	if not ok or DirAccess.rename_absolute(tmp, SAVE_PATH) != OK:
+		push_warning("DungeonState.save: falhou ao gravar %s" % SAVE_PATH)
+		DirAccess.remove_absolute(tmp)
 
-static func load_save() -> DungeonState:
+# Lista da chave, ou [] se faltar ou não for lista (save editado/corrompido).
+static func _array_of(data: Dictionary, key: String) -> Array:
+	var v: Variant = data.get(key, [])
+	return v if v is Array else []
+
+# Resultado de ler o save: status + estado (só em VALID). Ler nunca altera nem apaga o arquivo.
+static func _read_save() -> Dictionary:
+	var none := {"status": SaveStatus.NONE, "state": null}
 	if not FileAccess.file_exists(SAVE_PATH):
-		return null
+		return none
 	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
 	if file == null:
-		return null
+		return {"status": SaveStatus.UNREADABLE, "state": null}
 	var text := file.get_as_text()
 	file.close()
+	var corrupt := {"status": SaveStatus.CORRUPT, "state": null}
 	var json := JSON.new()
 	if json.parse(text) != OK:
-		return null
+		return corrupt
 	var raw: Variant = json.get_data()
 	if not raw is Dictionary:
-		return null
+		return corrupt
 	var data: Dictionary = raw
+	# Sem "version" = save legado (versão 0): carrega como antes. Versão maior que a deste
+	# jogo não é lida (nem tratada como corrompida): o arquivo fica intacto.
+	var version: Variant = data.get("version", 0)
+	if not (version is int or version is float) or int(version) < 0:
+		return corrupt
+	if int(version) > SAVE_VERSION:
+		return {"status": SaveStatus.NEWER, "state": null}
 	var state := DungeonState.new()
 	state.run_seed = int(data.get("run_seed", 0))
 	state.floor_count = int(data.get("floor_count", DungeonState.FLOOR_COUNT))
 	state.current_node_id = int(data.get("current_node_id", -1))
 	state.pending_room = bool(data.get("pending_room", false))
-	for pn in data.get("party_names", []):
+	for pn in _array_of(data, "party_names"):
 		state.party_names.append(str(pn))
-	for buff in data.get("pending_buffs", []):
+	for buff in _array_of(data, "pending_buffs"):
 		if buff is Dictionary:
 			state.pending_buffs.append(buff)
-	for nd: Dictionary in data.get("nodes", []):
+	# Nó malformado = save inválido (sem erro de runtime).
+	var node_keys: Array = ["id", "floor", "type", "completed", "pos_x", "pos_y", "connections"]
+	for nd in _array_of(data, "nodes"):
+		if not nd is Dictionary or not (nd as Dictionary).has_all(node_keys) or not nd["connections"] is Array:
+			return corrupt
 		var node := RoomNode.new()
 		node.id = int(nd["id"])
 		node.floor_idx = int(nd["floor"])
@@ -367,15 +398,36 @@ static func load_save() -> DungeonState:
 		for c in nd["connections"]:
 			node.connections.append(int(c))
 		state.nodes.append(node)
+	if state.nodes.is_empty():
+		return corrupt   # sem mapa não há run para continuar
 	# Névoa: restaura sets persistidos ou reconstrói saves legados.
 	if data.has("revealed"):
-		for rid in data.get("revealed", []):
+		for rid in _array_of(data, "revealed"):
 			state.revealed_ids[int(rid)] = true
-		for sid in data.get("seen", []):
+		for sid in _array_of(data, "seen"):
 			state.seen_ids[int(sid)] = true
 	else:
 		state._rebuild_reveal_from_progress()
-	return state
+	return {"status": SaveStatus.VALID, "state": state}
+
+static func load_save() -> DungeonState:
+	return _read_save()["state"]
+
+static func save_status() -> int:
+	return _read_save()["status"]
+
+# Move um save corrompido para <nome>.corrupt.json (ou -N) em vez de apagá-lo: o jogador
+# pode iniciar uma run nova sem perder os bytes. Devolve o novo caminho ("" se não moveu).
+static func quarantine_corrupt_save() -> String:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return ""
+	var base: String = SAVE_PATH.get_basename()
+	var dest: String = base + ".corrupt.json"
+	var n: int = 2
+	while FileAccess.file_exists(dest):
+		dest = "%s.corrupt-%d.json" % [base, n]
+		n += 1
+	return dest if DirAccess.rename_absolute(SAVE_PATH, dest) == OK else ""
 
 func reveal_extra_connections(from_node_id: int) -> void:
 	var from_node: RoomNode = get_node_by_id(from_node_id)
@@ -400,6 +452,4 @@ func reveal_extra_connections(from_node_id: int) -> void:
 
 static func delete_save() -> void:
 	if FileAccess.file_exists(SAVE_PATH):
-		var dir := DirAccess.open("user://")
-		if dir:
-			dir.remove("dungeon_save.json")
+		DirAccess.remove_absolute(SAVE_PATH)

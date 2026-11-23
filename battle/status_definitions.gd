@@ -9,7 +9,7 @@ class_name StatusDefinitions
 # BattleState.combatant_statuses[idx]; aqui só vivem os metadados de display.
 #
 # Chaves internas que NÃO devem aparecer na HUD (charmed_by, frightened_by,
-# reaction_used, disengage, disengage_exempt, reaction_settings, death_saves_*,
+# reaction_used, disengage, reaction_settings, death_saves_*,
 # stable) simplesmente não estão no REGISTRY — os painéis iteram ORDER.
 # ======================================================
 
@@ -17,20 +17,20 @@ class_name StatusDefinitions
 const REGISTRY: Dictionary = {
 	# ── Condições D&D/BG3 ────────────────────────────────────────────────
 	"burning":    {"name": "Em Chamas",   "desc": "Recebe 1d4 de Fogo no início do turno. Cancelado ao entrar na Água.", "color": Color(1.0, 0.45, 0.1),  "duration": true},
-	"blinded":    {"name": "Cego",        "desc": "Desvantagem nos ataques. Ataques contra: Vantagem. Não faz Ataque de Oportunidade.", "color": Color(0.55, 0.55, 0.6), "duration": true},
-	"frightened": {"name": "Amedrontado", "desc": "Não pode se aproximar da fonte do medo. Desvantagem em ataques.", "color": Color(0.8, 0.6, 0.2),   "duration": true},
+	"blinded":    {"name": "Cego",        "desc": "Desvantagem nos ataques e alcance reduzido a 2 casas (3 m). Ataques contra: Vantagem. Não faz Ataque de Oportunidade.", "color": Color(0.55, 0.55, 0.6), "duration": true},
+	"frightened": {"name": "Amedrontado", "desc": "Não pode se mover. Desvantagem em ataques e testes de habilidade.", "color": Color(0.8, 0.6, 0.2),   "duration": true},
 	"paralyzed":  {"name": "Paralisado",  "desc": "Não pode mover nem agir. Ataques contra: Vantagem (crítico se melee). Falha automática em saves de FOR e DES.", "color": Color(0.9, 0.85, 0.3),  "duration": true},
 	"restrained": {"name": "Contido",     "desc": "Não pode se mover. Ataques contra: Vantagem. Próprios ataques e saves de DES: Desvantagem.", "color": Color(0.6, 0.4, 0.25),  "duration": true},
 	"invisible":  {"name": "Invisível",   "desc": "Próprios ataques: Vantagem. Ataques contra: Desvantagem.", "color": Color(0.6, 0.8, 1.0),   "duration": true},
 	"charmed":    {"name": "Encantado",   "desc": "Não pode atacar quem o encantou.", "color": Color(1.0, 0.5, 0.85),  "duration": true},
 	"grappled":   {"name": "Agarrado",    "desc": "Não pode se mover. Pode atacar normalmente.", "color": Color(0.7, 0.5, 0.35),  "duration": true},
-	"prone":      {"name": "Prostrado",   "desc": "Caído. Ataques melee contra: Vantagem; ranged: Desvantagem. Levantar custa metade do movimento.", "color": Color(0.7, 0.7, 0.8),   "duration": false},
+	"prone":      {"name": "Prostrado",   "desc": "Caído. Ataques contra a até 3 m: Vantagem. Saves de FOR e DES: Desvantagem. Levantar custa metade do movimento.", "color": Color(0.7, 0.7, 0.8),   "duration": false},
 
 	# ── Status já existentes (unificados aqui para display coerente) ──────
-	"stun":       {"name": "Atordoado",      "desc": "Perde o turno completamente.", "color": Color(1.0, 0.9, 0.2),  "duration": false},
+	"stun":       {"name": "Atordoado",      "desc": "Perde o turno completamente. Ataques contra: Vantagem. Falha automática em saves de FOR e DES.", "color": Color(1.0, 0.9, 0.2),  "duration": false},
 	"poison":     {"name": "Veneno",         "desc": "Recebe dano no início do turno.", "color": Color(0.4, 0.9, 0.3),  "duration": true},
-	"poisoned":   {"name": "Envenenado",     "desc": "Desvantagem em ataques e saves.", "color": Color(0.5, 0.8, 0.2),  "duration": true},
-	"wet":        {"name": "Molhado",        "desc": "Vulnerável a Raio e Frio.", "color": Color(0.4, 0.7, 1.0),  "duration": true},
+	"poisoned":   {"name": "Envenenado",     "desc": "Desvantagem em ataques e testes de habilidade.", "color": Color(0.5, 0.8, 0.2),  "duration": true},
+	"wet":        {"name": "Molhado",        "desc": "Vulnerável a Raio e Frio; resistente a Fogo.", "color": Color(0.4, 0.7, 1.0),  "duration": true},
 	"acid":       {"name": "Ácido",          "desc": "-2 de CA.", "color": Color(0.5, 0.9, 0.1),  "duration": true},
 	"raging":     {"name": "Enfurecido",     "desc": "+2 de dano em ataques corpo a corpo.", "color": Color(1.0, 0.3, 0.2),  "duration": false},
 	"fury":       {"name": "Fúria +4 dano",  "desc": "+4 de dano (Bárbaro).", "color": Color(1.0, 0.2, 0.0),  "duration": false},
@@ -40,6 +40,14 @@ const REGISTRY: Dictionary = {
 	"hidden":     {"name": "Oculto",         "desc": "Vantagem nos ataques e habilita Furtivo. Quebra ao atacar ou ao ser avistado.", "color": Color(0.5, 0.5, 0.7),  "duration": false},
 	"coated_fire":{"name": "Arma em Chamas", "desc": "+1d4 de Fogo nos próximos ataques com arma.", "color": Color(1.0, 0.5, 0.2),  "duration": true},
 }
+
+# Regra de duração: condições que perdem 1 turno no INÍCIO do turno do portador.
+# Burning e poison (DoT) decaem no próprio tick de dano; stun/paralyzed ao
+# fazer o portador perder o turno; prone sai ao levantar. Ver BattleState.advance_turn.
+const DECAY_AT_TURN_START: Array = [
+	"raging", "acid", "wet", "poisoned", "blinded", "frightened", "restrained",
+	"invisible", "grappled", "bonus_d4", "charmed", "marked",
+]
 
 # Ordem de exibição nos painéis (condições negativas primeiro, buffs depois).
 const ORDER: Array = [

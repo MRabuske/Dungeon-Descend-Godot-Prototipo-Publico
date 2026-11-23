@@ -17,6 +17,7 @@ func _init() -> void:
 	damage_dice_count = 1
 	damage_dice_sides = 10
 	attack_damage_attribute = ActionData.DamageAttribute.STR
+	attack_damage_type      = ActionData.DamageType.BLUDGEONING
 	level        = 5
 	strength     = 18
 	dexterity    = 12
@@ -32,9 +33,9 @@ func _init() -> void:
 		"Enraging!",
 	]
 	action_behaviors = [
-		{"range": 1, "damage_mult": 1.4, "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0,  "buff_type": "",       "buff_value": 0, "buff_turns": 0},
-		{"range": 1, "damage_mult": 1.4, "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0,  "buff_type": "",       "buff_value": 0, "buff_turns": 0},
-		{"range": 1, "damage_mult": 1.0, "aoe_radius": 1, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0,  "buff_type": "",       "buff_value": 0, "buff_turns": 0},
-		{"range": 2, "damage_mult": 1.6, "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "stunned", "status_chance": 0.25, "buff_type": "",       "buff_value": 0, "buff_turns": 0},
-		{"range": 0, "damage_mult": 0.0, "aoe_radius": 0, "is_self_buff": true,  "is_flee": false, "applies_status": "",        "status_chance": 0.0,  "buff_type": "raging", "buff_value": 4, "buff_turns": 2},
+		{"range": 1, "damage_mult": 1.4, "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0,  "buff_type": "",       "buff_value": 0, "buff_turns": 0},
+		{"range": 1, "damage_mult": 1.4, "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0,  "buff_type": "",       "buff_value": 0, "buff_turns": 0},
+		{"range": 1, "damage_mult": 1.0, "aoe_ft": 5, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0,  "buff_type": "",       "buff_value": 0, "buff_turns": 0},
+		{"range": 2, "damage_mult": 1.6, "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "stunned", "status_chance": 0.25, "buff_type": "",       "buff_value": 0, "buff_turns": 0},
+		{"range": 0, "damage_mult": 0.0, "aoe_ft": 0, "is_self_buff": true,  "is_flee": false, "applies_status": "",        "status_chance": 0.0,  "buff_type": "raging", "buff_value": 4, "buff_turns": 2},
 	]

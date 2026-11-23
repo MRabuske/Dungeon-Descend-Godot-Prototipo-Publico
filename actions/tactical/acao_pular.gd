@@ -13,7 +13,6 @@ func _init() -> void:
 	color_idx    = COLOR_MOVE
 	bonus_action = true
 	attack_range = 1
-	aoe_radius   = 0
 	damage_attribute  = DamageAttribute.NONE
 	damage_dice_count = 0
 	damage_dice_sides = 0

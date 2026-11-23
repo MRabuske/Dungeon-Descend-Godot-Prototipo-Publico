@@ -9,6 +9,6 @@ func _init() -> void:
 	attack_range      = 1
 	proj_color        = Color.WHITE
 	damage_attribute  = DamageAttribute.STR
-	damage_type       = DamageType.PHYSICAL
+	damage_type       = DamageType.BLUDGEONING
 	is_weapon_attack  = true
 	icon 			  = preload("res://assets/ui/icons/attacks/atq_normal.png")

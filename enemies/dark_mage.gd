@@ -16,6 +16,7 @@ func _init() -> void:
 	damage_dice_count = 1
 	damage_dice_sides = 6
 	attack_damage_attribute = ActionData.DamageAttribute.INT
+	attack_damage_type      = ActionData.DamageType.NECROTIC
 	level        = 4
 	strength     = 8
 	dexterity    = 12
@@ -31,9 +32,9 @@ func _init() -> void:
 		"Teleporting...",
 	]
 	action_behaviors = [
-		{"range": 5, "damage_mult": 1.2, "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",           "buff_value": 0, "buff_turns": 0},
-		{"range": 5, "damage_mult": 1.2, "aoe_radius": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",           "buff_value": 0, "buff_turns": 0},
-		{"range": 1, "damage_mult": 0.8, "aoe_radius": 1, "is_self_buff": false, "is_flee": false, "applies_status": "stunned", "status_chance": 0.4, "buff_type": "",           "buff_value": 0, "buff_turns": 0},
-		{"range": 1, "damage_mult": 0.8, "aoe_radius": 1, "is_self_buff": false, "is_flee": false, "applies_status": "stunned", "status_chance": 0.4, "buff_type": "",           "buff_value": 0, "buff_turns": 0},
-		{"range": 0, "damage_mult": 0.0, "aoe_radius": 0, "is_self_buff": true,  "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "teleporting", "buff_value": 0, "buff_turns": 0},
+		{"range": 5, "damage_mult": 1.2, "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",           "buff_value": 0, "buff_turns": 0},
+		{"range": 5, "damage_mult": 1.2, "aoe_ft": 0, "is_self_buff": false, "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "",           "buff_value": 0, "buff_turns": 0},
+		{"damage_type": ActionData.DamageType.COLD, "range": 1, "damage_mult": 0.8, "aoe_ft": 5, "is_self_buff": false, "is_flee": false, "applies_status": "stunned", "status_chance": 0.4, "buff_type": "",           "buff_value": 0, "buff_turns": 0},
+		{"damage_type": ActionData.DamageType.COLD, "range": 1, "damage_mult": 0.8, "aoe_ft": 5, "is_self_buff": false, "is_flee": false, "applies_status": "stunned", "status_chance": 0.4, "buff_type": "",           "buff_value": 0, "buff_turns": 0},
+		{"range": 0, "damage_mult": 0.0, "aoe_ft": 0, "is_self_buff": true,  "is_flee": false, "applies_status": "",        "status_chance": 0.0, "buff_type": "teleporting", "buff_value": 0, "buff_turns": 0},
 	]

@@ -14,6 +14,9 @@ extends Control
 #   cancel_action / confirm_action — overlay de confirmacao (itens / fim de turno)
 signal grid_action_clicked(action)
 signal grid_action_hovered(action)
+# Seleção por teclado/controle: o item sob o anel (ActionData, Dictionary de item ou null) e
+# o retângulo global dele. A cena mostra o mesmo painel de detalhes do hover do mouse.
+signal grid_nav_selected(subject, anchor: Rect2)
 signal end_turn_pressed
 signal cancel_action
 signal confirm_action
@@ -30,7 +33,6 @@ const BTN_NORMAL      := preload("res://assets/ui/buttons/btn_normal.png")
 const BTN_HOVER       := preload("res://assets/ui/buttons/btn_hover.png")
 const BTN_PRESSED     := preload("res://assets/ui/buttons/btn_pressed.png")
 const ITEM_ICON_POCAO := preload("res://assets/ui/icons/itens/poção.png")
-const ITEM_ICON_ETER  := preload("res://assets/ui/icons/itens/éter.png")
 
 # ──────────────────────────────────────────────────────
 # TAMANHOS
@@ -114,6 +116,7 @@ class ResourceIcon extends Control:
 	enum Kind { DOT, ARROW }
 	var kind: int  = Kind.DOT
 	var used: bool = false
+	var active: bool = false   # filtro ativo neste indicador (borda branca do jogo)
 
 	const GREEN  := Color(0.30, 0.80, 0.35)
 	const ORANGE := Color(0.95, 0.55, 0.15)
@@ -129,6 +132,8 @@ class ResourceIcon extends Control:
 			draw_polygon(PackedVector2Array([
 				c + Vector2(0, -r), c + Vector2(r, r * 0.7), c + Vector2(-r, r * 0.7),
 			]), PackedColorArray([col]))
+		if active:
+			draw_rect(Rect2(Vector2.ZERO, size), FocusGlow.RING_COLOR, false, 2.0)
 
 # ======================================================
 # INNER — SLOT INDICATOR (nivel de spell slot / Ki, clicavel p/ filtrar)
@@ -141,7 +146,7 @@ class SlotIndicator extends Control:
 
 	const SLOT_COLOR    := Color(0.20, 0.55, 0.95)
 	const SLOT_SPENT    := Color(0.22, 0.22, 0.28)
-	const ACTIVE_BORDER := Color(0.90, 0.80, 0.20)
+	const ACTIVE_BORDER := FocusGlow.RING_COLOR
 	const KI_COLOR      := Color(0.95, 0.80, 0.30)
 
 	static func _roman(n: int) -> String:
@@ -156,7 +161,7 @@ class SlotIndicator extends Control:
 
 		if active:
 			draw_rect(Rect2(Vector2.ZERO, size), Color(col.r, col.g, col.b, 0.15))
-			draw_rect(Rect2(Vector2.ZERO, size), ACTIVE_BORDER, false, 1.5)
+			draw_rect(Rect2(Vector2.ZERO, size), ACTIVE_BORDER, false, 2.0)
 
 		var label := "Ki" if level == -1 else _roman(level)
 		draw_string(ThemeDB.fallback_font, Vector2(0, h * 0.45), label,
@@ -189,6 +194,7 @@ class GridCell extends Control:
 			# Se esta celula foi a origem de um drag, o release nao deve executar a
 			# acao (o usuario estava arrastando, nao clicando).
 			if panel._drag_source != self:
+				panel._nav_set("%s%d" % ["L" if side == "left" else "R", slot_index])
 				panel._on_cell_clicked(action)
 			panel._drag_source = null
 
@@ -236,6 +242,19 @@ var _right_cells: Array = []
 var _side_controls: VBoxContainer
 var _lock_btn: Button
 var _drag_source = null   # GridCell de origem do drag em curso (evita clique pós-drag)
+# Cursor da HUD (teclado/controle): id da entrada selecionada ("L<slot>", "R<slot>", "I<n>")
+# e o anel branco que a marca. O clique do mouse o move; o hover não.
+var _nav_id: String = ""
+var _nav_owner: int = -1   # herói ativo dono do cursor: ao trocar, volta ao primeiro item
+var _nav_ring: Panel = null
+# A cena desliga o anel quando outro elemento recebe os comandos (exame, pausa, reação):
+# um único indicador de seleção por vez.
+var nav_enabled: bool = true:
+	set(value):
+		if value == nav_enabled:
+			return
+		nav_enabled = value
+		_update_nav_ring()
 
 var _grid_locked: bool   = true
 var _filter_mode: int    = 0    # 0 = nenhum; 1 = Action (bonus=false); 2 = Bonus (bonus=true)
@@ -355,19 +374,36 @@ func _on_resource_clicked(event: InputEvent, mode: int) -> void:
 	var mb := event as InputEventMouseButton
 	if not (mb and mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed):
 		return
-	_slot_filter_level = 0  # filtros Action/Bonus e de slot sao mutuamente exclusivos
-	_filter_mode = 0 if _filter_mode == mode else mode
+	_apply_filter(0 if _filter_mode == mode else mode, 0)  # Action/Bonus e slot sao exclusivos
+
+# Aplica um filtro do grid (modo Action/Bonus OU nivel de slot/Ki) e redesenha tudo.
+func _apply_filter(mode: int, slot_level: int) -> void:
+	_filter_mode = mode
+	_slot_filter_level = slot_level
 	_update_grid()
+	_update_resource_bar()
+	_nav_validate()
+
+# LB/RB (Q/E): percorre os filtros da HUD — a "aba" do grid de ações. Sequência:
+# todas, Action, Bonus, cada nível de slot visível, Ki.
+func cycle_filter(delta: int) -> void:
+	if _state == null:
+		return
+	var options: Array = [[0, 0], [1, 0], [2, 0]]
+	for i in range(_slot_indicators.size()):
+		if (_slot_indicators[i] as SlotIndicator).visible:
+			options.append([0, (i + 1) if i < 6 else -1])
+	var cur := options.find([_filter_mode, _slot_filter_level])
+	var nxt: Array = options[posmod(maxi(cur, 0) + delta, options.size())]
+	_apply_filter(nxt[0], nxt[1])
+	announce_selection()
 
 # Clicar num indicador de slot filtra o grid para as magias daquele nivel (ou Ki).
 func _on_slot_indicator_clicked(event: InputEvent, level: int) -> void:
 	var mb := event as InputEventMouseButton
 	if not (mb and mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed):
 		return
-	_filter_mode = 0  # mutuamente exclusivo com Action/Bonus
-	_slot_filter_level = 0 if _slot_filter_level == level else level
-	_update_grid()
-	_update_resource_bar()
+	_apply_filter(0, 0 if _slot_filter_level == level else level)
 
 # ======================================================
 # BUILD — GRID (left + divider + right)
@@ -479,7 +515,7 @@ func _make_cell(grid: GridContainer, side: String, slot_index: int, number: int)
 	cell.add_child(num_lbl)
 	cell.num_lbl = num_lbl
 
-	cell.mouse_entered.connect(func() -> void: grid_action_hovered.emit(cell.action))
+	cell.mouse_entered.connect(func() -> void:  grid_action_hovered.emit(cell.action))
 	cell.mouse_exited.connect(func() -> void:  grid_action_hovered.emit(null))
 	return cell
 
@@ -537,12 +573,14 @@ func _add_item_cell(item: Dictionary) -> void:
 	cell.add_child(count_lbl)
 
 	var item_ref := item
+	var item_nav_id := "I%d" % _item_cells.size()
 	cell.gui_input.connect(func(ev: InputEvent) -> void:
 		var mb := ev as InputEventMouseButton
 		if mb and mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
+			_nav_set(item_nav_id)
 			grid_action_clicked.emit(item_ref)
 	)
-	cell.mouse_entered.connect(func() -> void: grid_action_hovered.emit(item_ref))
+	cell.mouse_entered.connect(func() -> void:  grid_action_hovered.emit(item_ref))
 	cell.mouse_exited.connect(func() -> void:  grid_action_hovered.emit(null))
 
 	_item_cells.append({"item": item, "drawer": drawer, "count_lbl": count_lbl})
@@ -550,7 +588,6 @@ func _add_item_cell(item: Dictionary) -> void:
 func _get_item_icon(label: String) -> Texture2D:
 	match label:
 		"Poção": return ITEM_ICON_POCAO
-		"Éter":  return ITEM_ICON_ETER
 		_:       return null
 
 # ======================================================
@@ -576,6 +613,7 @@ func _build_side_controls(parent: Control) -> void:
 	sb_lock.corner_radius_bottom_right = 4
 	_lock_btn.add_theme_stylebox_override("normal", sb_lock)
 	_lock_btn.add_theme_font_size_override("font_size", 10)
+	_lock_btn.focus_mode = Control.FOCUS_NONE
 	_lock_btn.pressed.connect(_on_lock_toggled)
 	_side_controls.add_child(_lock_btn)
 	_update_lock_label()
@@ -585,6 +623,7 @@ func _build_side_controls(parent: Control) -> void:
 	plus_btn.text = "+"
 	plus_btn.custom_minimum_size = Vector2(26, 22)
 	plus_btn.add_theme_font_size_override("font_size", 12)
+	plus_btn.focus_mode = Control.FOCUS_NONE
 	plus_btn.pressed.connect(func() -> void: _set_rows(_rows + 1))
 	_side_controls.add_child(plus_btn)
 
@@ -592,6 +631,7 @@ func _build_side_controls(parent: Control) -> void:
 	minus_btn.text = "−"
 	minus_btn.custom_minimum_size = Vector2(26, 22)
 	minus_btn.add_theme_font_size_override("font_size", 12)
+	minus_btn.focus_mode = Control.FOCUS_NONE
 	minus_btn.pressed.connect(func() -> void: _set_rows(_rows - 1))
 	_side_controls.add_child(minus_btn)
 
@@ -706,6 +746,7 @@ func _make_text_button(text: String) -> TextureButton:
 	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(lbl)
+	FocusGlow.attach(btn)
 	return btn
 
 # ======================================================
@@ -722,6 +763,10 @@ func refresh() -> void:
 	_update_resource_bar()
 	_update_grid()
 	_update_items_bar()
+	if _state.active_index != _nav_owner:
+		_nav_owner = _state.active_index
+		_nav_id = ""
+	_nav_validate()
 
 # ======================================================
 # UPDATE — VISIBILITY
@@ -774,6 +819,8 @@ func _update_resource_bar() -> void:
 	# Apagam (cinza) quando o recurso ja foi consumido no turno.
 	_action_dot.used  = _state.has_attacked
 	_bonus_arrow.used = _state.has_used_bonus_action
+	_action_dot.active  = _filter_mode == 1
+	_bonus_arrow.active = _filter_mode == 2
 	_action_dot.queue_redraw()
 	_bonus_arrow.queue_redraw()
 
@@ -911,9 +958,9 @@ func _fill_side_sparse(cells: Array, slot_map: Dictionary) -> void:
 			drawer.icon_texture = action.icon if action.has_icon() else null
 			drawer.is_active    = false
 			cell.num_lbl.visible = true
-			cell.modulate = Color(1, 1, 1, 0.45) if unavailable else Color.WHITE
+			_dim_cell(cell, unavailable)
 		else:
-			cell.modulate = Color.WHITE
+			_dim_cell(cell, false)
 			cell.action = null
 			cell.tooltip_text = ""
 			drawer.shape = -1
@@ -971,9 +1018,9 @@ func _fill_side(cells: Array, actions: Array) -> void:
 			drawer.icon_texture = action.icon if action.has_icon() else null
 			drawer.is_active    = false
 			cell.num_lbl.visible = true
-			cell.modulate = Color(1, 1, 1, 0.45) if unavailable else Color.WHITE
+			_dim_cell(cell, unavailable)
 		else:
-			cell.modulate = Color.WHITE
+			_dim_cell(cell, false)
 			cell.action = null
 			cell.tooltip_text = ""
 			drawer.shape        = -1
@@ -981,6 +1028,117 @@ func _fill_side(cells: Array, actions: Array) -> void:
 			drawer.is_active    = false
 			cell.num_lbl.visible = false
 		drawer.queue_redraw()
+
+# ======================================================
+# CURSOR DA HUD (teclado / controle)
+# ======================================================
+# Entradas navegáveis = o que está VISÍVEL: células com ação (esquerda e direita) e a
+# barra de itens. O cursor marca exatamente o que Enter/A executaria.
+func _nav_entries() -> Array:
+	var entries: Array = []
+	var left_cols := maxi(1, _divider)
+	var right_cols := maxi(1, GRID_COLS - _divider)
+	for i in range(_left_cells.size()):
+		if (_left_cells[i] as GridCell).action != null:
+			entries.append({"id": "L%d" % i, "row": i / left_cols, "col": i % left_cols})
+	for i in range(_right_cells.size()):
+		if (_right_cells[i] as GridCell).action != null:
+			entries.append({"id": "R%d" % i, "row": i / right_cols, "col": left_cols + i % right_cols})
+	for i in range(_item_cells.size()):
+		entries.append({"id": "I%d" % i, "row": _rows, "col": i})
+	return entries
+
+# Controle (célula ou ícone do item) que corresponde ao id, ou null se vazio/inexistente.
+func _nav_control(id: String) -> Control:
+	if id.length() < 2:
+		return null
+	var idx := int(id.substr(1))
+	match id[0]:
+		"L":
+			if idx < _left_cells.size() and (_left_cells[idx] as GridCell).action != null:
+				return _left_cells[idx]
+		"R":
+			if idx < _right_cells.size() and (_right_cells[idx] as GridCell).action != null:
+				return _right_cells[idx]
+		"I":
+			if idx < _item_cells.size():
+				return _item_cells[idx]["drawer"]
+	return null
+
+# Ação (ActionData) ou item (Dictionary) sob o cursor; null se nada selecionável.
+func nav_selected() -> Variant:
+	var id := _nav_id
+	if _nav_control(id) == null:
+		return null
+	var idx := int(id.substr(1))
+	match id[0]:
+		"L": return (_left_cells[idx] as GridCell).action
+		"R": return (_right_cells[idx] as GridCell).action
+		"I": return _item_cells[idx]["item"]
+	return null
+
+func nav_move(dir: Vector2i) -> void:
+	_nav_id = HudNav.step(_nav_entries(), _nav_id, dir)
+	_update_nav_ring()
+	announce_selection()
+
+# Emite o item selecionado e onde ele está (para o painel de detalhes). Itens desabilitados
+# também saem; sem seleção, emite null.
+func announce_selection() -> void:
+	var control: Control = _nav_control(_nav_id)
+	if control == null:
+		grid_nav_selected.emit(null, Rect2())
+		return
+	grid_nav_selected.emit(nav_selected(), control.get_global_rect())
+
+# Teclas 1-6: seleciona a célula cujo número (o do canto da célula) é n.
+func nav_select_by_number(n: int) -> bool:
+	for group in [_left_cells, _right_cells]:
+		for i in range(group.size()):
+			var cell: GridCell = group[i]
+			if cell.action != null and cell.num_lbl.text == str(n):
+				_nav_id = "%s%d" % ["L" if group == _left_cells else "R", i]
+				_update_nav_ring()
+				announce_selection()
+				return true
+	return false
+
+# Id selecionado (para testes e depuração).
+func nav_id() -> String:
+	return _nav_id
+
+# O clique do mouse num item o torna o cursor: o anel (oculto com o mouse) reaparece nele
+# quando o teclado/controle voltar. O hover não move o cursor.
+func _nav_set(id: String) -> void:
+	if _nav_control(id) == null:
+		return
+	_nav_id = id
+	_update_nav_ring()
+
+# Garante um cursor válido (o conteúdo do grid muda a cada refresh/filtro/arraste).
+func _nav_validate() -> void:
+	if _nav_control(_nav_id) == null:
+		_nav_id = HudNav.step(_nav_entries(), "", Vector2i.ZERO)
+	_update_nav_ring()
+
+func _update_nav_ring() -> void:
+	var target: Control = _nav_control(_nav_id)
+	if _nav_ring == null or not is_instance_valid(_nav_ring):
+		_nav_ring = FocusGlow.make_ring()
+	if target == null:
+		_nav_ring.visible = false
+		return
+	if _nav_ring.get_parent() != target:
+		if _nav_ring.get_parent() != null:
+			_nav_ring.get_parent().remove_child(_nav_ring)
+		target.add_child(_nav_ring)
+	_nav_ring.visible = nav_enabled and _grid_body != null and _grid_body.visible
+
+# Itens indisponíveis ficam esmaecidos (ícone + número), sem apagar o anel de seleção.
+func _dim_cell(cell: GridCell, dimmed: bool) -> void:
+	var tint := Color(1, 1, 1, 0.45) if dimmed else Color.WHITE
+	cell.drawer.modulate = tint
+	cell.num_lbl.modulate = tint
 
 # ======================================================
 # CALLBACKS / OVERLAY

@@ -89,10 +89,10 @@ func _try_generate() -> MapData:
 				continue
 			tmap[col][row] = _weighted_pick(weights)
 
-	# Step 4b: re-check connectivity — OBSTACLEs placed in Step 4 can sever the map
+	# Step 4b: re-check connectivity — OBSTACLEs e COVERs (que bloqueiam o movimento) placed in Step 4 can sever the map
 	var cxb := int(cols / 2.0)
 	var cyb := int(rows / 2.0)
-	if tmap[cxb][cyb] == TileType.VOID or tmap[cxb][cyb] == TileType.OBSTACLE:
+	if _is_wall(tmap[cxb][cyb]):
 		var found2 := false
 		for rr in range(1, maxi(cols, rows)):
 			for dcc in range(-rr, rr + 1):
@@ -100,7 +100,7 @@ func _try_generate() -> MapData:
 					var tc := cxb + dcc
 					var trr := cyb + drr
 					if tc >= 0 and tc < cols and trr >= 0 and trr < rows:
-						if tmap[tc][trr] != TileType.VOID and tmap[tc][trr] != TileType.OBSTACLE:
+						if not _is_wall(tmap[tc][trr]):
 							cxb = tc
 							cyb = trr
 							found2 = true
@@ -114,7 +114,7 @@ func _try_generate() -> MapData:
 	var reachable2 := _flood_fill(tmap, cols, rows, Vector2i(cxb, cyb))
 	for col in range(cols):
 		for row in range(rows):
-			if tmap[col][row] != TileType.VOID and tmap[col][row] != TileType.OBSTACLE:
+			if not _is_wall(tmap[col][row]):
 				if not (Vector2i(col, row) in reachable2):
 					tmap[col][row] = TileType.VOID
 
@@ -125,14 +125,14 @@ func _try_generate() -> MapData:
 	var right_tiles: Array[Vector2i] = []
 	for col in range(cols):
 		for row in range(rows):
-			if tmap[col][row] == TileType.VOID or tmap[col][row] == TileType.OBSTACLE:
+			if _is_wall(tmap[col][row]):
 				continue
 			var free_neighbors := 0
 			for d in sdirs:
 				var nx: int = col + d.x
 				var ny: int = row + d.y
 				if nx >= 0 and nx < cols and ny >= 0 and ny < rows:
-					if tmap[nx][ny] != TileType.VOID and tmap[nx][ny] != TileType.OBSTACLE:
+					if not _is_wall(tmap[nx][ny]):
 						free_neighbors += 1
 			if free_neighbors < 2:
 				continue
@@ -182,7 +182,7 @@ func _flood_fill(tmap: Array, cols: int, rows: int, start: Vector2i) -> Array:
 			if nxt.x < 0 or nxt.x >= cols or nxt.y < 0 or nxt.y >= rows:
 				continue
 			var nt: int = tmap[nxt.x][nxt.y]
-			if nt == TileType.VOID or nt == TileType.OBSTACLE:
+			if _is_wall(nt):
 				continue
 			if not visited.has(nxt):
 				frontier.append(nxt)
@@ -238,3 +238,9 @@ func _fallback_map() -> MapData:
 	md.hero_spawns  = [Vector2i(2,9), Vector2i(1,7), Vector2i(1,11), Vector2i(3,9)]
 	md.enemy_spawns = [Vector2i(19,7), Vector2i(20,9), Vector2i(19,11), Vector2i(21,9)]
 	return md
+
+# Casas que o movimento não atravessa nem ocupa (vazio, Obstáculo e Cobertura). Conectividade e
+# spawns usam o mesmo critério do pathfinder (BattleState._step_allowed). A flood fill segue em
+# 4 direções: tudo que ela alcança é alcançável também com as 8 direções.
+func _is_wall(t: int) -> bool:
+	return t == TileType.VOID or t == TileType.OBSTACLE or t == TileType.COVER

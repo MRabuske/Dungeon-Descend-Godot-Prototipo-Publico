@@ -7,10 +7,11 @@ func _init() -> void:
 	shape            = SHAPE_HEXAGON
 	color_idx        = COLOR_SPELL
 	attack_range     = 8
-	aoe_radius       = 1
+	area_kind        = AreaShape.Kind.SPHERE
+	area_size_ft     = 5
 	proj_color       = Color(0.6, 1.0, 0.5)
 	damage_attribute = DamageAttribute.DEX
-	damage_type      = DamageType.PHYSICAL
+	damage_type      = DamageType.PIERCING
 	damage_dice_count = 1
 	damage_dice_sides = 6
 	spell_slot_level = 2
@@ -19,3 +20,4 @@ func _init() -> void:
 	sfx_impact         = "whoosh_bow"
 	requires_saving_throw = true
 	save_attribute        = DamageAttribute.DEX
+	is_spell         = true

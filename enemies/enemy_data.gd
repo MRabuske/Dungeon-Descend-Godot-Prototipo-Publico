@@ -20,6 +20,10 @@ extends Resource
 @export var damage_dice_count: int = 1
 @export var damage_dice_sides: int = 6
 @export var attack_damage_attribute: ActionData.DamageAttribute = ActionData.DamageAttribute.STR
+# Tipo de dano padrão dos ataques; cada action_behaviors pode sobrescrever com "damage_type".
+@export var attack_damage_type: ActionData.DamageType = ActionData.DamageType.BLUDGEONING
+## Empunha arma à distância (arco): não faz Ataque de Oportunidade (BG3).
+@export var ranged_weapon: bool = false
 @export var level: int = 1
 @export var strength: int = 10
 @export var dexterity: int = 10

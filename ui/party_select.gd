@@ -369,6 +369,7 @@ func _build_card(hname: String) -> NinePatchRect:
 	card.gui_input.connect(func(ev: InputEvent) -> void:
 		var mb := ev as InputEventMouseButton
 		if mb and mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+			_focus_card(hname)
 			_toggle_hero(hname)
 	)
 
@@ -425,12 +426,10 @@ func _build_buttons_row(parent: Control) -> void:
 
 	_start_btn = _add_texture_button(row, "Iniciar Batalha", _on_start)
 
-	var hint := Label.new()
-	hint.text = "← → Navegar   ·   ENTER Selecionar   ·   ↑ ↓ Mudar área   ·   F Confirmar   ·   ESC Voltar"
-	hint.add_theme_font_size_override("font_size", 10)
-	hint.add_theme_color_override("font_color", Color(0.45, 0.45, 0.50))
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var hint := HintBar.new()
 	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hint.set_hints([[&"navigate", "Navegar"], [&"confirm", "Selecionar"],
+		[&"start_party", "Confirmar"], [&"back", "Voltar"]])
 	parent.add_child(hint)
 
 # ======================================================
@@ -478,8 +477,35 @@ func _set_cursor(idx: int, scroll: bool) -> void:
 	_cursor = idx
 	if _area == 0:
 		_cards[_hero_names[_cursor]].modulate = Color(1.18, 1.12, 0.88)
+	_update_sel_ring()
 	if scroll:
 		_scroll_to_cursor()
+
+# Clique do mouse: o cursor do teclado/controle passa a ser o card clicado (o anel só
+# reaparece com tecla/controle, já nele).
+func _focus_card(hname: String) -> void:
+	if _area != 0:
+		_set_area(0)
+	_set_cursor(_hero_names.find(hname), false)
+
+# Anel branco padrão do jogo no item sob o cursor (card de herói ou botão de baixo).
+var _sel_ring: Panel = null
+func _update_sel_ring() -> void:
+	if _sel_ring == null:
+		_sel_ring = FocusGlow.make_ring()
+	var target: Control = null
+	if _area == 0 and not _hero_names.is_empty():
+		target = _cards[_hero_names[_cursor]]
+	elif _area == 1 and _back_btn != null:
+		target = _back_btn if _btn_cursor == 0 else _start_btn
+	if target == null:
+		_sel_ring.visible = false
+		return
+	if _sel_ring.get_parent() != target:
+		if _sel_ring.get_parent() != null:
+			_sel_ring.get_parent().remove_child(_sel_ring)
+		target.add_child(_sel_ring)
+	_sel_ring.visible = true
 
 func _scroll_to_cursor() -> void:
 	if _hero_names.is_empty():
@@ -499,6 +525,7 @@ func _set_area(area: int) -> void:
 		if _btn_cursor == 1 and _start_btn.disabled:
 			_btn_cursor = 0
 		_set_btn_visual(_btn_cursor, true)
+	_update_sel_ring()
 
 func _move_btn_cursor(delta: int) -> void:
 	_set_btn_visual(_btn_cursor, false)
@@ -507,6 +534,7 @@ func _move_btn_cursor(delta: int) -> void:
 		next = 0
 	_btn_cursor = next
 	_set_btn_visual(_btn_cursor, true)
+	_update_sel_ring()
 
 func _set_btn_visual(idx: int, focused: bool) -> void:
 	var btn := _back_btn if idx == 0 else _start_btn

@@ -31,6 +31,7 @@ const RESOLUTION_LABELS := ["1280 x 720", "1600 x 900", "1920 x 1080"]
 # ======================================================
 var _fullscreen_btn: TextureButton
 var _vsync_btn: TextureButton
+var _vibration_btn: TextureButton
 var _overlay: ColorRect
 var _panel: Control
 var _res_dropdown_btn: TextureButton
@@ -56,6 +57,7 @@ func _ready() -> void:
 	_build_overlay()
 	_build_panel()
 	_build_res_popup()
+	HintBar.attach_bottom(self, [[&"navigate", "Navegar"], [&"confirm", "Alternar"], [&"back", "Voltar"]])
 
 # ======================================================
 # BUILD — OVERLAY
@@ -75,7 +77,7 @@ func _build_panel() -> void:
 	add_child(center)
 
 	_panel = Control.new()
-	_panel.custom_minimum_size = Vector2(520, 360)
+	_panel.custom_minimum_size = Vector2(520, 410)
 	center.add_child(_panel)
 
 	# Background NinePatch
@@ -130,8 +132,12 @@ func _build_toggles(parent: Control) -> void:
 	_vsync_btn = _add_toggle(parent, "Vsync", settings.get("vsync", true), func(on: bool):
 		_save_and_apply("vsync", on)
 	)
-	# Store the two rows (last two children added to parent)
+	_vibration_btn = _add_toggle(parent, "Vibração", settings.get("vibration", true), func(on: bool):
+		_save_and_apply("vibration", on)
+	)
+	# Store the three rows (last three children added to parent)
 	var children := parent.get_children()
+	_option_items.append(children[children.size() - 3])
 	_option_items.append(children[children.size() - 2])
 	_option_items.append(children[children.size() - 1])
 
@@ -337,10 +343,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_DOWN, KEY_S:
 			_move_opt_focus(1)
 		KEY_LEFT, KEY_A:
-			if _focused_opt == 2:
+			if _focused_opt == 3:
 				_cycle_resolution(-1)
 		KEY_RIGHT, KEY_D:
-			if _focused_opt == 2:
+			if _focused_opt == 3:
 				_cycle_resolution(1)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			_activate_focused_opt()
@@ -360,13 +366,32 @@ func _set_opt_focus(idx: int) -> void:
 	_focused_opt = idx
 	if _focused_opt < _option_items.size():
 		_option_items[_focused_opt].modulate = Color(1.18, 1.12, 0.88)
+	_update_opt_ring.call_deferred()
+
+# Anel branco padrão do jogo ao redor da linha em foco. As linhas ficam dentro de
+# containers (adicionar um filho as reorganizaria), então o anel é filho do painel,
+# posicionado sobre o retângulo da linha — lido depois do layout, por isso o call_deferred.
+# (top_level não serve: o anel não chega a ser desenhado.)
+var _opt_ring: Panel = null
+func _update_opt_ring() -> void:
+	if _option_items.is_empty() or _focused_opt >= _option_items.size():
+		return
+	if _opt_ring == null:
+		_opt_ring = FocusGlow.make_ring()
+		_opt_ring.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		_opt_ring.z_index = 10
+		_panel.add_child(_opt_ring)
+	var r: Rect2 = _option_items[_focused_opt].get_global_rect().grow(4.0)
+	_opt_ring.position = r.position - _panel.global_position
+	_opt_ring.size = r.size
 
 func _activate_focused_opt() -> void:
 	match _focused_opt:
 		0: _fullscreen_btn.pressed.emit()
 		1: _vsync_btn.pressed.emit()
-		2: _cycle_resolution(1)
-		3: hide_panel()
+		2: _vibration_btn.pressed.emit()
+		3: _cycle_resolution(1)
+		4: hide_panel()
 
 func _cycle_resolution(delta: int) -> void:
 	_res_idx = (_res_idx + delta + RESOLUTIONS.size()) % RESOLUTIONS.size()

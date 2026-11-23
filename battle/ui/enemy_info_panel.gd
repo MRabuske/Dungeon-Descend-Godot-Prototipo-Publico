@@ -155,6 +155,4 @@ func _get_portrait(combatant: Dictionary) -> Texture2D:
 				var portrait = enemy_data.to_combat_dict().get("portrait")
 				if portrait and portrait is Texture2D:
 					return portrait
-			elif enemy_data.has("portrait"):
-				return enemy_data.portrait
 	return null

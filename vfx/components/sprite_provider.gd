@@ -36,8 +36,6 @@ static func get_combatant_sprite(combatant: Dictionary, _idx: int) -> Texture2D:
 				var sprite = enemy_dict.get("sprite")
 				if sprite and sprite is Texture2D:
 					return sprite
-			elif enemy_data.has("sprite"):
-				return enemy_data.sprite
 	return null
 
 static func create_fallback_texture(combatant: Dictionary, _idx: int) -> Texture2D:
@@ -47,7 +45,7 @@ static func create_fallback_texture(combatant: Dictionary, _idx: int) -> Texture
 	var color: Color
 	if combatant["is_player"]:
 		var player_idx = _find_player_index(combatant["name"])
-		color = PLAYER_COLORS[player_idx] if player_idx >= 0 else PLAYER_COLORS[0]
+		color = PLAYER_COLORS[maxi(player_idx, 0) % PLAYER_COLORS.size()]   # 8 heróis, 4 cores: repete
 	else:
 		color = Color(0.85, 0.25, 0.25)
 	

@@ -53,21 +53,21 @@ static var TURN_QUEUE: Array = [
 # non-caster=[0,...]. Monge é non-caster mas tem 4 Ki (level 4 × ki_per_level 1).
 static var PLAYERS: Array = [
 	{"name": "Guerreiro", "hp": 80,  "max_hp": 100, "spell_slots": [0,0,0,0,0,0], "spell_slots_max": [0,0,0,0,0,0], "ki": 0, "ki_max": 0,
-	 "class": "Fighter", "level": 4, "ac": 16, "initiative": 8,  "speed": 7, "proficiency": 3},
+	 "class": "Fighter", "level": 4, "ac": 16, "speed": 7, "proficiency": 3},
 	{"name": "Mago",      "hp": 60,  "max_hp": 100, "spell_slots": [4,3,0,0,0,0], "spell_slots_max": [4,3,0,0,0,0], "ki": 0, "ki_max": 0,
-	 "class": "Wizard",  "level": 4, "ac": 12, "initiative": 5,  "speed": 6, "proficiency": 3},
+	 "class": "Wizard",  "level": 4, "ac": 12, "speed": 6, "proficiency": 3},
 	{"name": "Arqueiro",  "hp": 70,  "max_hp": 100, "spell_slots": [3,0,0,0,0,0], "spell_slots_max": [3,0,0,0,0,0], "ki": 0, "ki_max": 0,
-	 "class": "Ranger",  "level": 4, "ac": 14, "initiative": 10, "speed": 8, "proficiency": 3},
+	 "class": "Ranger",  "level": 4, "ac": 14, "speed": 8, "proficiency": 3},
 	{"name": "Clérigo",   "hp": 75,  "max_hp": 100, "spell_slots": [4,3,0,0,0,0], "spell_slots_max": [4,3,0,0,0,0], "ki": 0, "ki_max": 0,
-	 "class": "Cleric",  "level": 4, "ac": 15, "initiative": 6,  "speed": 7, "proficiency": 3},
+	 "class": "Cleric",  "level": 4, "ac": 15, "speed": 7, "proficiency": 3},
 	{"name": "Ladrao",    "hp": 55,  "max_hp": 100, "spell_slots": [0,0,0,0,0,0], "spell_slots_max": [0,0,0,0,0,0], "ki": 0, "ki_max": 0,
-	 "class": "Rogue",   "level": 4, "ac": 13, "initiative": 9,  "speed": 9, "proficiency": 3},
+	 "class": "Rogue",   "level": 4, "ac": 13, "speed": 9, "proficiency": 3},
 	{"name": "Bárbaro",  "hp": 95,  "max_hp": 120, "spell_slots": [0,0,0,0,0,0], "spell_slots_max": [0,0,0,0,0,0], "ki": 0, "ki_max": 0,
-	 "class": "Barbarian", "level": 4, "ac": 12, "initiative": 7, "speed": 6, "proficiency": 3},
+	 "class": "Barbarian", "level": 4, "ac": 12, "speed": 6, "proficiency": 3},
 	{"name": "Paladino",  "hp": 80,  "max_hp": 110, "spell_slots": [3,0,0,0,0,0], "spell_slots_max": [3,0,0,0,0,0], "ki": 0, "ki_max": 0,
-	 "class": "Paladin", "level": 4, "ac": 16, "initiative": 6,  "speed": 6, "proficiency": 3},
+	 "class": "Paladin", "level": 4, "ac": 16, "speed": 6, "proficiency": 3},
 	{"name": "Monge",     "hp": 65,  "max_hp": 90,  "spell_slots": [0,0,0,0,0,0], "spell_slots_max": [0,0,0,0,0,0], "ki": 4, "ki_max": 4,
-	 "class": "Monk",    "level": 4, "ac": 14, "initiative": 11, "speed": 10, "proficiency": 3},
+	 "class": "Monk",    "level": 4, "ac": 14, "speed": 10, "proficiency": 3},
 ]
 
 static func setup_party(hero_names: Array) -> void:
@@ -79,12 +79,7 @@ static func setup_party(hero_names: Array) -> void:
 			PLAYERS.append(hero.to_combat_dict())
 			TURN_QUEUE.append({"name": hname, "is_player": true})
 	for edata: EnemyData in ALL_ENEMIES.values():
-		TURN_QUEUE.append({
-			"name": edata.enemy_name,
-			"is_player": false,
-			"type": edata.enemy_type,
-			"ac": edata.ac,
-		})
+		_append_enemy(edata)
 	for p in PLAYERS:
 		p["bonus_atk"] = 0
 		p["bonus_def"] = 0
@@ -121,36 +116,83 @@ static func setup_enemies_for_room(room_type: int) -> void:
 	for key in enemy_keys:
 		var edata: EnemyData = ALL_ENEMIES.get(key, null)
 		if edata != null:
-			TURN_QUEUE.append({
-				"name":      edata.enemy_name,
-				"is_player": false,
-				"type":      edata.enemy_type,
-				"ac":        edata.ac,
-			})
+			_append_enemy(edata)
+
+# Adiciona um inimigo à fila com NOME ÚNICO (o nome é a chave de enemy_hp):
+# um segundo "Goblin Scout" vira "Goblin Scout 2", sem compartilhar HP.
+static func _append_enemy(edata: EnemyData) -> void:
+	var taken: Dictionary = {}
+	for e in TURN_QUEUE:
+		taken[e["name"]] = true
+	var ename: String = edata.enemy_name
+	var n: int = 2
+	while taken.has(ename):
+		ename = "%s %d" % [edata.enemy_name, n]
+		n += 1
+	TURN_QUEUE.append({"name": ename, "is_player": false, "type": edata.enemy_type, "ac": edata.ac})
+
+# ── Acesso a combatentes por índice de TURN_QUEUE (identidade do combate) ──
+# Escondem a divisão PLAYERS (heróis) / enemy_hp (inimigos): quem chama não
+# precisa saber o lado do combatente.
+func player_index_of(idx: int) -> int:
+	if idx < 0 or idx >= TURN_QUEUE.size() or not TURN_QUEUE[idx]["is_player"]:
+		return -1
+	return _player_index_by_name(TURN_QUEUE[idx]["name"])
+
+func get_hp(idx: int) -> int:
+	if idx < 0 or idx >= TURN_QUEUE.size():
+		return 0
+	var pidx: int = player_index_of(idx)
+	if pidx >= 0:
+		return int(PLAYERS[pidx]["hp"])
+	return int(enemy_hp.get(TURN_QUEUE[idx]["name"], 0))
+
+func get_max_hp(idx: int) -> int:
+	if idx < 0 or idx >= TURN_QUEUE.size():
+		return 0
+	var pidx: int = player_index_of(idx)
+	if pidx >= 0:
+		return int(PLAYERS[pidx]["max_hp"])
+	return get_enemy_max_hp(idx)
+
+# Nunca abaixo de 0; cura não passa do máximo, mas HP já acima dele não é cortado.
+func _set_hp(idx: int, value: int) -> void:
+	var v: int = clampi(value, 0, maxi(get_max_hp(idx), get_hp(idx)))
+	var pidx: int = player_index_of(idx)
+	if pidx >= 0:
+		PLAYERS[pidx]["hp"] = v
+	elif not TURN_QUEUE[idx]["is_player"]:
+		enemy_hp[TURN_QUEUE[idx]["name"]] = v
 
 var tab_action:      Array[ActionData] = []
 var tab_habilidades: Array[ActionData] = []
 
-static var TAB_ITEMS: Array = [
-	{"label": "Poção", "shape": 2, "color_idx": 5, "count": 3, "is_item": true, "heal": 30},
-	{"label": "Éter",  "shape": 2, "color_idx": 5, "count": 1, "is_item": true, "spell_slot_restore": 1},
-]
+# Poção de Cura (BG3, bg3.wiki/wiki/Potion_of_Healing): 2d4+2 PV, remove Em Chamas. Beber custa uma
+# Ação Bônus; arremessar (AcaoArremessarPocao) custa uma Ação e cura quem estiver na nuvem.
+# Não existe item que devolve spell slot (o Éter era resto do antigo sistema de mana).
+const POTION_DICE := 2
+const POTION_SIDES := 4
+const POTION_FLAT := 2
+
+static func _new_items() -> Array:
+	return [
+		{"label": "Poção", "shape": 2, "color_idx": 5, "count": 3, "is_item": true,
+		 "heal_dice": POTION_DICE, "heal_sides": POTION_SIDES, "heal_flat": POTION_FLAT, "bonus_action": true},
+	]
+
+static var TAB_ITEMS: Array = _new_items()
 
 static var TAB_END_TURN: Array[ActionData] = [
 	AcaoEsperar.new(),
 	AcaoFugir.new(),
 ]
 
-const TAB_LABELS := ["ACTION", "HABILIDADES", "ITEMS"]
-const MAX_SLOTS  := 6
 # Condições que a ação Ajudar/Help remove do alvo (BG3). Manter genérico:
 # acrescentar novas chaves aqui conforme forem criadas (ensnared, sleeping…).
 const HELP_CLEARS := ["prone", "restrained", "burning"]
 
 var current_state:        State     = State.PLAYER_TURN
 var active_index:         int       = 0
-var active_tab:           int       = 0
-var cursor_position:      int       = 0
 var enemy_action_text:         String    = ""
 var active_enemy_action_idx:   int       = 0
 var move_points_remaining:     int       = 0
@@ -164,12 +206,21 @@ var attack_target_indices: Array[int] = []
 var attack_cursor_idx:    int       = 0
 var current_attack_range: int       = 0
 var current_attack_color: Color     = Color.WHITE
-var current_aoe_radius:   int       = 0
-# Mira de AoE em PONTO do chao (BG3): quando ativo, o cursor de ataque e um TILE
-# livre dentro do alcance (nao precisa de criatura no centro). Ligado em
-# enter_attack_mode quando aoe_radius > 0.
+# Pegada da última área aplicada (a MESMA lista da prévia); a BattleScene anima por ela.
+var last_area_tiles:      Array[Vector2i] = []
+var last_area_center:     Vector2   = Vector2.ZERO   # coordenadas do motor: casa (c, r) = [c, c+1] × [r, r+1]
+# Mira de área em PONTO do chão (BG3): quando ativo, o cursor de ataque é um TILE livre dentro do
+# alcance (não precisa de criatura no centro). Ligado em enter_attack_mode para áreas que se
+# miram no chão (esfera, cilindro, cubo) e para o Pulo.
 var attack_tile_mode:     bool      = false
+# Esfera e cilindro se miram num CRUZAMENTO de casas (D&D 2024): nesse modo `cursor_tile` guarda o
+# canto (0..cols, 0..rows) — o canto (x, y) é o vértice superior-esquerdo da casa (x, y).
+var attack_corner_mode:   bool      = false
 var attack_tile_cursor:   Vector2i  = Vector2i.ZERO
+# Cursor de quadrado único de MOVE_MODE/ATTACK_MODE (mouse, analógico, D-pad e setas
+# escrevem aqui). Pode apontar para qualquer quadrado — inclusive fora do grid, com
+# (-1,-1) quando o mouse sai da área. A validade só é cobrada na confirmação.
+var cursor_tile:          Vector2i  = Vector2i(-1, -1)
 var _attack_targets_allies: bool    = false
 var _attack_self_target: bool       = false
 var _current_attack_is_bonus: bool  = false
@@ -212,10 +263,7 @@ func setup(map_data) -> void:
 	tile_data_map = map_data.tile_data_map
 	hero_spawns = map_data.hero_spawns
 	enemy_spawns = map_data.enemy_spawns
-	TAB_ITEMS = [
-		{"label": "Poção", "shape": 2, "color_idx": 5, "count": 3, "is_item": true, "heal": 30},
-		{"label": "Éter",  "shape": 2, "color_idx": 5, "count": 1, "is_item": true, "spell_slot_restore": 1},
-	]
+	TAB_ITEMS = _new_items()
 	dead_indices.clear()
 	battle_result = ""
 	combatant_statuses.clear()
@@ -226,6 +274,7 @@ func setup(map_data) -> void:
 	last_attack_info.clear()
 	combat_log.clear()
 	pending_deaths.clear()
+	pending_downed.clear()
 	battle_stats = {
 		"turns": 0,
 		"player_damage_dealt": 0,
@@ -265,17 +314,6 @@ func _tile_cost(pos: Vector2i) -> int:
 		return 2
 	return 1
 
-func _tile_at(idx: int) -> int:
-	var pos: Vector2i = combatant_positions[idx]
-	var tile: TerrainTile = tile_data_map[pos.x][pos.y]
-	match tile.ground:
-		TerrainTile.GroundType.NORMAL:
-			return MapGenerator.TileType.NORMAL
-		TerrainTile.GroundType.MUD:
-			return MapGenerator.TileType.MUD
-		_:
-			return MapGenerator.TileType.NORMAL
-
 func _is_elevated(idx: int) -> bool:
 	var pos: Vector2i = combatant_positions[idx]
 	var tile: TerrainTile = tile_data_map[pos.x][pos.y]
@@ -286,20 +324,56 @@ func _is_elevated(idx: int) -> bool:
 # aplicam efeitos ao entrar no tile ou no início do turno. Ver battle/surface_type.gd.
 
 # Distância em TILES (Chebyshev / king-move): inclui diagonais. Métrica única de
-# alcance de ataque/spell e de raio de AoE (D&D/BG3). NÃO usar para movimento/AI.
+# alcance de ataque/spell e de raio de AoE (D&D/BG3). Vale também para movimento, IA, OA e Disengage.
 static func king_dist(a: Vector2i, b: Vector2i) -> int:
 	return maxi(absi(a.x - b.x), absi(a.y - b.y))
 
-func _get_tiles_in_radius(center: Vector2i, radius: int) -> Array[Vector2i]:
+# ── ÁREAS (D&D 2024): UMA função de pegada para prévia, animação e efeito ───────────────────────
+# `aim` depende da forma: esfera/cilindro = o CRUZAMENTO (o canto (x, y) é o vértice superior-
+# esquerdo da casa (x, y)); cubo = a casa mirada; emanação = a casa da criatura de origem; cone e
+# linha = a casa mirada (a origem sai do canto da casa do conjurador mais próximo dela).
+# Entram só as casas dentro do grid e que não são vazio.
+func area_footprint(action: ActionData, aim: Vector2i, caster_idx: int) -> Array[Vector2i]:
+	var raw: Array[Vector2i] = []
+	match action.area_kind:
+		AreaShape.Kind.SPHERE, AreaShape.Kind.CYLINDER:
+			raw = AreaShape.sphere(Vector2(aim), action.area_size_ft)
+		AreaShape.Kind.CUBE:
+			raw = AreaShape.cube_square(aim, action.area_size_ft)
+		AreaShape.Kind.EMANATION:
+			raw = AreaShape.emanation(aim, action.area_size_ft, action.area_includes_origin)
+		AreaShape.Kind.CONE:
+			raw = AreaShape.cone(AreaShape.self_origin(combatant_positions[caster_idx], aim),
+				Vector2(aim) + Vector2(0.5, 0.5), action.area_size_ft)
+		AreaShape.Kind.LINE:
+			raw = AreaShape.line(AreaShape.self_origin(combatant_positions[caster_idx], aim),
+				Vector2(aim) + Vector2(0.5, 0.5), action.area_size_ft, action.area_width_ft)
 	var tiles: Array[Vector2i] = []
-	for dx in range(-radius, radius + 1):
-		for dy in range(-radius, radius + 1):
-			if maxi(absi(dx), absi(dy)) <= radius:
-				var p := center + Vector2i(dx, dy)
-				if p.x >= 0 and p.x < grid_cols and p.y >= 0 and p.y < grid_rows:
-					if not tile_data_map[p.x][p.y].is_void():
-						tiles.append(p)
+	for t in raw:
+		if _in_grid(t) and not tile_data_map[t.x][t.y].is_void():
+			tiles.append(t)
 	return tiles
+
+# Centro da área em coordenadas do motor (a animação parte dele).
+func area_center(action: ActionData, aim: Vector2i, caster_idx: int) -> Vector2:
+	match action.area_kind:
+		AreaShape.Kind.SPHERE, AreaShape.Kind.CYLINDER:
+			return Vector2(aim)
+		AreaShape.Kind.CONE, AreaShape.Kind.LINE:
+			return AreaShape.self_origin(combatant_positions[caster_idx], aim)
+	return Vector2(aim) + Vector2(0.5, 0.5)
+
+func current_has_area() -> bool:
+	return _current_action != null and _current_action.has_area()
+
+# Casas da prévia de área para o cursor atual (vazio se o cursor não é válido para confirmar).
+func get_area_preview_tiles() -> Array[Vector2i]:
+	var none: Array[Vector2i] = []
+	if current_state != State.ATTACK_MODE or not current_has_area() or not attack_tile_mode:
+		return none
+	if not get_cursor_feedback()["valid"]:
+		return none
+	return area_footprint(_current_action, cursor_tile, active_index)
 
 # Resultado quando duas superfícies se encontram no mesmo tile.
 # 'incoming' é a superfície nova sendo depositada.
@@ -320,7 +394,8 @@ func _resolve_surface_interaction(existing: int, incoming: int) -> int:
 	# Padrão: a nova substitui a existente
 	return incoming
 
-func _add_surface(pos: Vector2i, type: int) -> void:
+## `dc`: CD do save da superfície (Gelo: a CD de magia de quem a criou); 0 = sem conjurador (armadilha).
+func _add_surface(pos: Vector2i, type: int, dc: int = 0) -> void:
 	if type == SurfaceType.Type.NONE:
 		tile_surfaces.erase(pos)
 		return
@@ -330,21 +405,35 @@ func _add_surface(pos: Vector2i, type: int) -> void:
 	if result_type == SurfaceType.Type.NONE:
 		tile_surfaces.erase(pos)
 	else:
-		tile_surfaces[pos] = {"type": result_type, "turns": SurfaceType.DURATION[result_type]}
+		tile_surfaces[pos] = {"type": result_type, "turns": SurfaceType.DURATION[result_type], "dc": dc}
 
 # Pinta superfície no tile do alvo + tiles de AoE após um ataque bem-sucedido.
 # Para Trovão (marcador ELECTRIFIED_WATER): só converte tiles que já têm Água.
 func _deposit_surface_after_attack(target_pos: Vector2i, action: ActionData) -> void:
 	if action == null or action.creates_surface == SurfaceType.Type.NONE:
 		return
-	var radius: int = action.aoe_radius if action.aoe_radius > 0 else 0
-	var tiles: Array[Vector2i] = _get_tiles_in_radius(target_pos, radius)
+	# Com área, `target_pos` é a mira (cruzamento, casa ou origem, conforme a forma); sem área, só a casa.
+	var tiles: Array[Vector2i] = area_footprint(action, target_pos, active_index) \
+		if action.has_area() else ([target_pos] as Array[Vector2i])
+	# Gelo: a CD do save de cair Prone é a CD de magia de quem conjurou (bg3.wiki/wiki/Ice_(surface)).
+	var ice_dc: int = _spell_save_dc(active_index, action.damage_attribute) \
+		if action.creates_surface == SurfaceType.Type.ICE else 0
+	var fresh_ice: Array[Vector2i] = []   # Gelo em chão sem outra superfície: o save dispara na criação
 	for t in tiles:
 		if action.creates_surface == SurfaceType.Type.ELECTRIFIED_WATER:
 			if tile_surfaces.get(t, {}).get("type", SurfaceType.Type.NONE) == SurfaceType.Type.WATER:
 				_add_surface(t, SurfaceType.Type.ELECTRIFIED_WATER)
 		else:
-			_add_surface(t, action.creates_surface)
+			var had_surface: bool = tile_surfaces.has(t)
+			_add_surface(t, action.creates_surface, ice_dc)
+			if action.creates_surface == SurfaceType.Type.ICE and not had_surface:
+				fresh_ice.append(t)
+	for t in fresh_ice:
+		if tile_surfaces.get(t, {}).get("type", SurfaceType.Type.NONE) != SurfaceType.Type.ICE:
+			continue
+		for ci in range(TURN_QUEUE.size()):
+			if not dead_indices.has(ci) and combatant_positions[ci] == t:
+				_apply_ice_prone_save(ci, ice_dc)
 	# Fogo criado EMBAIXO de um combatente parado tambem o deixa "Em Chamas"
 	# (BG3), nao so quando ele anda para dentro. Checa o tipo RESULTANTE de cada
 	# tile (respeita interacoes Fogo+Agua->Vapor / Fogo+Gelo->Agua). Sem dano
@@ -365,22 +454,77 @@ func _deposit_surface_after_attack(target_pos: Vector2i, action: ActionData) -> 
 func _ignite(idx: int) -> void:
 	apply_condition(idx, "burning", 2)
 
-# Aplica dano a um combatente (jogador ou inimigo), tratando morte.
-# Centraliza a ramificação player/enemy usada por superfícies.
-func _deal_damage_to_combatant(combatant_idx: int, dmg: int) -> void:
-	var entry: Dictionary = TURN_QUEUE[combatant_idx]
-	if entry["is_player"]:
-		var pidx: int = _player_index_by_name(entry["name"])
-		if pidx >= 0:
-			PLAYERS[pidx]["hp"] = maxi(0, PLAYERS[pidx]["hp"] - dmg)
-			_check_concentration_after_damage(combatant_idx, dmg)
-			if PLAYERS[pidx]["hp"] <= 0:
-				_on_death(combatant_idx)
-	else:
-		var new_hp: int = maxi(0, enemy_hp.get(entry["name"], 0) - dmg)
-		enemy_hp[entry["name"]] = new_hp
-		if new_hp <= 0:
+# Ponto ÚNICO de aplicação de dano (jogador ou inimigo). Mitiga cada componente
+# pelo próprio tipo (BG3: "each damage type is dealt separately") — `extra` =
+# {DamageType: valor} para componentes adicionais (ex.: Smite radiante) — e
+# soma num único dano. Dano aplicado 0 não toca HP, concentração nem Death Saves.
+# Senão: escreve HP, testa concentração (CD max(10, dano/2)) e trata Downed
+# (dano = 1 falha, crítico = 2) / morte. Devolve o dano aplicado.
+# Estatísticas, floaters, logs e last_attack_info ficam com o chamador.
+func _deal_damage_to_combatant(combatant_idx: int, amount: int, damage_type: int,
+		is_crit: bool = false, extra: Dictionary = {}, mitigate: bool = true) -> int:
+	if dead_indices.has(combatant_idx):
+		return 0   # morto não sofre dano nem "morre" de novo
+	# mitigate=false: valor já mitigado (golpe pendente reduzido por reação).
+	var applied: int = _mitigated_total(combatant_idx, amount, damage_type, extra) if mitigate else amount
+	if applied <= 0:
+		return 0
+	return _apply_hp_damage(combatant_idx, applied, is_crit)
+
+# Soma dos componentes, cada um mitigado pelo próprio tipo (sem efeitos colaterais).
+func _mitigated_total(idx: int, amount: int, damage_type: int, extra: Dictionary) -> int:
+	var applied: int = _apply_damage_type_mods(idx, damage_type, amount)
+	for t in extra:
+		applied += _apply_damage_type_mods(idx, t, int(extra[t]))
+	return applied
+
+# ── Janela de reação (BG3): o golpe fica PENDENTE enquanto reações como
+# Esquiva Sobrenatural, Defletir Projéteis e Smite o modificam; o dano é
+# aplicado UMA vez em commit_pending_hit(), antes de concentração/Downed.
+var hold_hits_for_reactions: bool = false
+var pending_hit: Dictionary = {}
+
+# Aplica já ou guarda o golpe (quando a scene abriu a janela de reação).
+# Devolve o dano (projetado, se guardado) para stats/last_attack_info.
+func _commit_or_hold(idx: int, amount: int, damage_type: int, is_crit: bool, extra: Dictionary, stat_key: String) -> int:
+	if not hold_hits_for_reactions or dead_indices.has(idx):
+		return _deal_damage_to_combatant(idx, amount, damage_type, is_crit, extra)
+	pending_hit = {"target_idx": idx, "amount": amount, "damage_type": damage_type, "is_crit": is_crit,
+		"extra": extra.duplicate(), "post_mult": 1.0, "post_flat": 0, "stat_key": stat_key, "counted": 0}
+	pending_hit["counted"] = _pending_final()
+	return pending_hit["counted"]
+
+# Dano final do golpe pendente: mitigação por componente, depois as reduções
+# das reações (multiplicador e redução fixa).
+func _pending_final() -> int:
+	var h: Dictionary = pending_hit
+	var mitigated: int = _mitigated_total(h["target_idx"], h["amount"], h["damage_type"], h["extra"])
+	return maxi(0, floori(mitigated * float(h["post_mult"])) - int(h["post_flat"]))
+
+func commit_pending_hit() -> int:
+	if pending_hit.is_empty():
+		return 0
+	var h: Dictionary = pending_hit
+	var final_dmg: int = _pending_final()
+	pending_hit = {}
+	var applied: int = _deal_damage_to_combatant(h["target_idx"], final_dmg, h["damage_type"], h["is_crit"], {}, false)
+	battle_stats[h["stat_key"]] = battle_stats.get(h["stat_key"], 0) + applied - int(h["counted"])
+	return applied
+
+func _apply_hp_damage(combatant_idx: int, applied: int, is_crit: bool) -> int:
+	if applied <= 0:
+		return 0
+	if TURN_QUEUE[combatant_idx]["is_player"] and player_index_of(combatant_idx) < 0:
+		return 0
+	_set_hp(combatant_idx, get_hp(combatant_idx) - applied)
+	remove_condition(combatant_idx, "invisible")   # tomar dano acaba a Invisibilidade (bg3.wiki/wiki/Invisible)
+	_check_concentration_after_damage(combatant_idx, applied)
+	if get_hp(combatant_idx) <= 0:
+		if is_downed(combatant_idx):
+			_add_death_save_failure(combatant_idx, 2 if is_crit else 1)   # Downed: 1 falha, crítico 2
+		else:
 			_on_death(combatant_idx)
+	return applied
 
 # Registra um indicador VISUAL de dano no canal pending_surface_hits (lido por
 # BattleScene._flush_surface_floaters: floater + hit-flash + barra de HP).
@@ -390,6 +534,13 @@ func _register_damage_floater(target_idx: int, damage: int, color: Color, label:
 	if damage <= 0:
 		return
 	pending_surface_hits.append({"target_idx": target_idx, "damage": damage, "label": label, "color": color})
+
+# Idem para CURA (nuvem da Poção): o BattleScene mostra o número verde, sem o flash de dano.
+func _register_heal_floater(target_idx: int, healed: int) -> void:
+	if healed <= 0:
+		return
+	pending_surface_hits.append({"target_idx": target_idx, "damage": healed, "label": "",
+		"color": ActionData.damage_type_color(ActionData.DamageType.HEALING), "is_heal": true})
 
 # ── Mitigação por tipo de dano (Resistência/Vulnerabilidade/Imunidade) ───────
 # Convenção: strings das listas = nomes do enum DamageType (ex.: "FIRE"),
@@ -414,9 +565,11 @@ func _mitigate(amount: int, damage_type: int, res, vuln, imm, wet: bool) -> int:
 		return 0
 	var resistant: bool = _type_in_list(res, tname)
 	var vulnerable: bool = _type_in_list(vuln, tname)
-	# Wet (BG3): vulnerabilidade dinâmica a COLD e THUNDER.
-	if wet and (damage_type == ActionData.DamageType.COLD or damage_type == ActionData.DamageType.THUNDER):
+	# Wet (BG3): vulnerável a COLD e LIGHTNING, resistente a FIRE.
+	if wet and (damage_type == ActionData.DamageType.COLD or damage_type == ActionData.DamageType.LIGHTNING):
 		vulnerable = true
+	if wet and damage_type == ActionData.DamageType.FIRE:
+		resistant = true
 	if resistant and vulnerable:
 		return amount          # cancelam → dano normal
 	if resistant:
@@ -425,8 +578,8 @@ func _mitigate(amount: int, damage_type: int, res, vuln, imm, wet: bool) -> int:
 		return amount * 2
 	return amount
 
-# Engrenagem ÚNICA usada por todos os pontos de dano. Busca as listas do alvo
-# (HeroData/EnemyData) e o status Wet, e devolve o dano mitigado.
+# Lookup de mitigação do alvo (listas de HeroData/EnemyData + Wet). Puro: quem
+# APLICA dano é _deal_damage_to_combatant; aqui só se calcula o valor.
 func _apply_damage_type_mods(target_idx: int, damage_type: int, amount: int) -> int:
 	var entry: Dictionary = TURN_QUEUE[target_idx]
 	var res: Array = []
@@ -452,11 +605,17 @@ func _apply_damage_type_mods(target_idx: int, damage_type: int, amount: int) -> 
 func _tick_all_surfaces() -> void:
 	var expired: Array[Vector2i] = []
 	for pos in tile_surfaces:
+		if tile_surfaces[pos]["turns"] == SurfaceType.PERMANENT:
+			continue   # Água não expira
 		tile_surfaces[pos]["turns"] -= 1
 		if tile_surfaces[pos]["turns"] <= 0:
 			expired.append(pos)
 	for pos in expired:
-		tile_surfaces.erase(pos)
+		# Água Eletrificada "volta a ser Água" (bg3.wiki/wiki/Electrified_Water); as outras somem.
+		if tile_surfaces[pos].get("type", SurfaceType.Type.NONE) == SurfaceType.Type.ELECTRIFIED_WATER:
+			tile_surfaces[pos] = {"type": SurfaceType.Type.WATER, "turns": SurfaceType.PERMANENT, "dc": 0}
+		else:
+			tile_surfaces.erase(pos)
 
 # Dano de superfície no início do turno do combatente que está sobre ela.
 func _apply_surface_tick(combatant_idx: int) -> void:
@@ -467,17 +626,25 @@ func _apply_surface_tick(combatant_idx: int) -> void:
 		# do tick de burning em advance_turn — nao ha dano direto de superficie.
 		_ignite(combatant_idx)
 		return
+	if s_type == SurfaceType.Type.POISON:
+		# "must made a Constitution Saving Throw each turn" (bg3.wiki/wiki/Poison_Cloud). Duração 2:
+		# o decaimento do início do turno vem logo depois e deixa o Envenenado valer até o próximo.
+		_apply_poison_cloud_save(combatant_idx, 2)
+		return
 	if not SurfaceType.TICK_DAMAGE.has(s_type):
 		return
 	var td: Dictionary = SurfaceType.TICK_DAMAGE[s_type]
 	var dmg: int = DiceRoller.roll(td["count"], td["sides"])
-	var type_name: String
-	match s_type:
-		SurfaceType.Type.CLOUD_OF_DAGGERS: type_name = "nuvem de adagas"
-		_:                                 type_name = "raio"
-	_register_damage_floater(combatant_idx, dmg, ActionData.damage_type_color(ActionData.DamageType.PHYSICAL), "Cortante")
-	_deal_damage_to_combatant(combatant_idx, dmg)
-	_log("%s sofreu %d de dano de %s (superfície)" % [TURN_QUEUE[combatant_idx]["name"], dmg, type_name], "dmg")
+	var type_name: String = "raio"
+	var dtype: int = ActionData.DamageType.LIGHTNING        # Electrified Water (BG3)
+	var label: String = "Raio"
+	if s_type == SurfaceType.Type.CLOUD_OF_DAGGERS:
+		type_name = "nuvem de adagas"
+		dtype = ActionData.DamageType.SLASHING              # Cloud of Daggers (BG3)
+		label = "Cortante"
+	var applied: int = _deal_damage_to_combatant(combatant_idx, dmg, dtype)
+	_register_damage_floater(combatant_idx, applied, ActionData.damage_type_color(dtype), label)
+	_log("%s sofreu %d de dano de %s (superfície)" % [TURN_QUEUE[combatant_idx]["name"], applied, type_name], "dmg")
 
 # Sneak Attack (BG3/D&D): só dispara se o Ladrão tiver Vantagem líquida na
 # rolagem OU houver um aliado a ≤1 tile do alvo, e no máximo uma vez por turno.
@@ -490,18 +657,29 @@ func _can_sneak_attack(attacker_idx: int, target_idx: int) -> bool:
 	var hdata := ALL_HERO_DATA.get(entry["name"], null) as HeroData
 	if hdata == null or hdata.hero_class != "Rogue":
 		return false
+	# BG3: só em ataque com arma, e a arma tem de ser sutil (finesse) ou o ataque à distância.
+	if _current_action != null and not _current_action.is_weapon_attack:
+		return false
+	var sneak_pidx: int = player_index_of(attacker_idx)
+	if sneak_pidx < 0:
+		return false
+	var weapon: WeaponData = PLAYERS[sneak_pidx].get("weapon", null)
+	if weapon != null and not weapon.is_finesse and current_attack_range <= 1:
+		return false   # (sem arma = grupo padrão legado dos testes: não bloqueia)
 	# Condição 1: vantagem líquida nesta rolagem de ataque.
 	var mods: Dictionary = _get_attack_roll_mods(attacker_idx, target_idx, current_attack_range)
 	if mods["adv"] > 0 and mods["dis"] == 0:
 		return true
-	# Condição 2: um aliado do Ladrão adjacente ao alvo (Manhattan ≤ 1).
+	# BG3: a condição do aliado só vale sem Desvantagem líquida na rolagem.
+	if mods["dis"] > 0 and mods["adv"] == 0:
+		return false
+	# Condição 2: um aliado do Ladrão adjacente ao alvo (Chebyshev ≤ 1: a diagonal conta).
 	var target_pos: Vector2i = combatant_positions[target_idx]
 	for i in range(TURN_QUEUE.size()):
 		if i == attacker_idx or dead_indices.has(i):
 			continue
 		if TURN_QUEUE[i].get("is_player", false):
-			var ally_pos: Vector2i = combatant_positions[i]
-			if absi(ally_pos.x - target_pos.x) + absi(ally_pos.y - target_pos.y) <= 1:
+			if king_dist(combatant_positions[i], target_pos) <= 1:
 				return true
 	return false
 
@@ -527,31 +705,115 @@ func get_current_action() -> ActionData:
 ## Estimated probability [0.05, 0.95] that the active player hits target_idx with the
 ## current action. Mirrors the bonus math in _apply_attack() but rolls no dice.
 ## Auto-hit actions (AOE, or non-weapon spells that consume a spell slot) return 1.0.
+# ── Matemática de ataque compartilhada (rolagem real e preview) ──────────────
+# CA efetiva do alvo: base (PLAYERS / fila) + condições (Ácido -2).
+func _effective_ac(idx: int) -> int:
+	var pidx: int = player_index_of(idx)
+	var ac: int = int(PLAYERS[pidx].get("ac", 10)) if pidx >= 0 else int(TURN_QUEUE[idx].get("ac", 10))
+	if combatant_statuses[idx].get("acid", 0) > 0:
+		ac -= 2
+	return ac
+
+# Críticos automáticos (BG3). Alvo Downed: ataque corpo a corpo (contra Downed, crítico = 2 falhas de
+# Death Save; bg3.wiki/wiki/Death_saving_throw). Alvo Paralisado: qualquer ataque feito de até 3 m
+# (2 casas) — texto da condição em bg3.wiki/wiki/Paralysed; o card da página diz só "melee", mas a
+# regra listada é "within 3 m (10 ft)". Usado pelo ataque de herói e de inimigo.
+func _auto_crit(attacker_idx: int, target_idx: int, attack_range: int) -> bool:
+	if attack_range <= 1 and is_downed(target_idx):
+		return true
+	return combatant_statuses[target_idx].get("paralyzed", 0) > 0 \
+		and king_dist(combatant_positions[attacker_idx], combatant_positions[target_idx]) <= 2
+
+# Modificador de atributo de um dicionário de herói (STR/DEX/INT/WIS; demais = 0).
+func _stat_mod(p: Dictionary, attr: ActionData.DamageAttribute) -> int:
+	match attr:
+		ActionData.DamageAttribute.STR: return _raw_mod(p.get("strength", 10))
+		ActionData.DamageAttribute.DEX: return _raw_mod(p.get("dexterity", 10))
+		ActionData.DamageAttribute.INT: return _raw_mod(p.get("intelligence", 10))
+		ActionData.DamageAttribute.WIS: return _raw_mod(p.get("wisdom", 10))
+	return 0
+
+# Bônus de acerto de um herói para a ação: proficiência + atributo (arma/finesse
+# ou o da ação) + bônus da arma. Mesma conta no ataque real e no preview.
+func _player_attack_bonus(pidx: int, action: ActionData) -> Dictionary:
+	var p: Dictionary = PLAYERS[pidx]
+	var weapon: WeaponData = p.get("weapon", null)
+	var attr: ActionData.DamageAttribute = ActionData.DamageAttribute.STR
+	var weapon_bonus: int = 0
+	if action != null and action.is_weapon_attack and weapon != null:
+		attr = weapon.damage_attribute
+		weapon_bonus = weapon.attack_bonus
+		if weapon.is_finesse:
+			attr = ActionData.DamageAttribute.DEX if _stat_mod(p, ActionData.DamageAttribute.DEX) >= _stat_mod(p, ActionData.DamageAttribute.STR) else ActionData.DamageAttribute.STR
+	elif action != null:
+		attr = action.damage_attribute
+	var prof: int = int(p.get("proficiency", 2))
+	var attr_mod: int = _stat_mod(p, attr)
+	return {"attr": attr, "attr_mod": attr_mod, "prof": prof, "weapon_bonus": weapon_bonus,
+		"bonus": prof + attr_mod + weapon_bonus, "crit_threshold": int(p.get("crit_threshold", 20))}
+
+# Perfil de ataque de um inimigo (ataque normal e Ataque de Oportunidade).
+func _enemy_attack_profile(idx: int) -> Dictionary:
+	var ed := ALL_ENEMIES.get(TURN_QUEUE[idx].get("type", ""), null) as EnemyData
+	if ed == null:
+		return {"atk_bonus": 2, "prof": 2, "attr_mod": 0, "crit_threshold": 20, "dice_count": 1, "dice_sides": 6, "bonus": 4}
+	var attr_val: int = ed.strength
+	match ed.attack_damage_attribute:
+		ActionData.DamageAttribute.DEX: attr_val = ed.dexterity
+		ActionData.DamageAttribute.INT: attr_val = ed.intelligence
+		ActionData.DamageAttribute.WIS: attr_val = ed.wisdom
+	var attr_mod: int = _raw_mod(attr_val)
+	return {"atk_bonus": ed.attack_bonus, "prof": ed.proficiency, "attr_mod": attr_mod,
+		"crit_threshold": ed.crit_threshold, "dice_count": ed.damage_dice_count,
+		"dice_sides": ed.damage_dice_sides, "bonus": ed.proficiency + attr_mod + ed.attack_bonus}
+
+# Probabilidade EXATA de acerto (sem rolar dados): enumera o d20 — nat 1 sempre
+# erra, d20 >= crit_threshold sempre acerta — e os d4 de bônus (Guidance/Bless);
+# Vantagem = 1-(1-p)², Desvantagem = p² (as duas juntas se anulam).
+func _hit_probability(bonus: int, ac: int, crit_threshold: int, adv: int, dis: int, bonus_dice: int) -> float:
+	var hits: float = 0.0
+	for r in range(2, 21):
+		if r >= crit_threshold:
+			hits += 1.0
+			continue
+		var need: int = ac - bonus - r   # quanto os d4 precisam somar
+		if need <= 0:
+			hits += 1.0
+		elif bonus_dice > 0:
+			hits += _prob_d4_sum_at_least(bonus_dice, need)
+	var p: float = hits / 20.0
+	if adv > 0 and dis == 0:
+		return 1.0 - (1.0 - p) * (1.0 - p)
+	if dis > 0 and adv == 0:
+		return p * p
+	return p
+
+func _prob_d4_sum_at_least(n: int, need: int) -> float:
+	var sums: Array = [0]
+	for _i in range(n):
+		var nxt: Array = []
+		for s in sums:
+			for f in range(1, 5):
+				nxt.append(s + f)
+		sums = nxt
+	var ok: int = 0
+	for s in sums:
+		if s >= need:
+			ok += 1
+	return float(ok) / float(sums.size())
+
+# Chance de acerto exibida no preview: mesmas regras da rolagem real.
 func calc_hit_chance(target_idx: int) -> float:
 	var action := _current_action
-	if action != null and (action.aoe_radius > 0 or (not action.is_weapon_attack and action.spell_slot_level > 0)):
+	if action != null and (action.has_area() or (not action.is_weapon_attack and action.spell_slot_level > 0)):
 		return 1.0
 	var pidx := get_active_player_index()
 	if pidx < 0 or target_idx < 0 or target_idx >= TURN_QUEUE.size():
 		return 0.5
-	var target_ac: int = TURN_QUEUE[target_idx].get("ac", 10)
-	var prof: int = PLAYERS[pidx].get("proficiency", 2)
-	var weapon: WeaponData = PLAYERS[pidx].get("weapon", null)
-	var weapon_attack_bonus: int = 0
-	var attr: ActionData.DamageAttribute = ActionData.DamageAttribute.STR
-	if action != null and action.is_weapon_attack and weapon != null:
-		attr = weapon.damage_attribute
-		weapon_attack_bonus = weapon.attack_bonus
-		if weapon.is_finesse:
-			var p: Dictionary = PLAYERS[pidx]
-			var str_mod := _raw_mod(p.get("strength",  10))
-			var dex_mod := _raw_mod(p.get("dexterity", 10))
-			attr = ActionData.DamageAttribute.DEX if dex_mod >= str_mod else ActionData.DamageAttribute.STR
-	elif action != null:
-		attr = action.damage_attribute
-	var attr_mod: int = _get_attr_modifier(attr)
-	var bonus: int = prof + attr_mod + weapon_attack_bonus
-	return clampf((21.0 - target_ac + bonus) / 20.0, 0.05, 0.95)
+	var pb: Dictionary = _player_attack_bonus(pidx, action)
+	var mods: Dictionary = _get_attack_roll_mods(active_index, target_idx, current_attack_range)
+	return _hit_probability(pb["bonus"] + int(mods.get("flat", 0)), _effective_ac(target_idx),
+		pb["crit_threshold"], mods["adv"], mods["dis"], int(mods.get("bonus_dice", 0)))
 
 func _load_hero_actions(player_name: String) -> void:
 	var hdata: HeroData = ALL_HERO_DATA.get(player_name, null)
@@ -582,8 +844,11 @@ func _load_hero_actions(player_name: String) -> void:
 	tab_habilidades.append(AcaoDip.new())
 	tab_habilidades.append(AcaoPular.new())
 	tab_habilidades.append(AcaoArremessar.new())
+	tab_habilidades.append(AcaoArremessarPocao.new())
 
 func is_item_available(item) -> bool:
+	if active_ended():
+		return false   # herói que já encerrou o turno só pode cancelar o fim de turno
 	if item is ActionData:
 		var action := item as ActionData
 		if action.action_type == ActionData.Type.ATTACK:
@@ -603,28 +868,21 @@ func is_item_available(item) -> bool:
 		# Esconder gasta a Action principal.
 		if action is AcaoEsconder and has_attacked:
 			return false
-		# Mergulhar gasta a Ação Bônus.
-		if action is AcaoDip and has_used_bonus_action:
+		# Ações táticas de Ação Bônus (Mergulhar, Segundo Vento, Passo do Vento).
+		if action.action_type != ActionData.Type.ATTACK and action.bonus_action and has_used_bonus_action:
+			return false
+		# Arremessar Poção exige uma Poção no estoque.
+		if action is AcaoArremessarPocao and potion_count() <= 0:
 			return false
 		# Pular exige deslocamento disponível.
 		if action is AcaoPular and move_points_remaining < JUMP_MOVE_COST:
 			return false
-		if action.spell_slot_level > 0:
-			var pidx := get_active_player_index()
-			if pidx >= 0:
-				var slots: Array = PLAYERS[pidx].get("spell_slots", [0, 0, 0, 0, 0, 0])
-				var has_slot := false
-				for i in range(action.spell_slot_level - 1, slots.size()):
-					if slots[i] > 0:
-						has_slot = true
-						break
-				if not has_slot:
-					return false
-		if action.ki_cost > 0:
-			var pidx_ki := get_active_player_index()
-			if pidx_ki >= 0 and PLAYERS[pidx_ki].get("ki", 0) < action.ki_cost:
-				return false
-		if action.max_pp > 0 and action.pp <= 0:
+		var pidx_r := get_active_player_index()
+		if pidx_r >= 0 and action.spell_slot_level > 0 and not has_slot_at_or_above(pidx_r, action.spell_slot_level):
+			return false
+		if action.ki_cost > 0 and pidx_r >= 0 and PLAYERS[pidx_r].get("ki", 0) < action.ki_cost:
+			return false
+		if pidx_r >= 0 and uses_left(pidx_r, action) <= 0:
 			return false
 		# Recurso genérico "pool" (ex.: Imposição de Mãos).
 		if action.pool_key != "":
@@ -640,6 +898,8 @@ func is_item_available(item) -> bool:
 				return false
 		return true
 	if item is Dictionary:
+		if item.get("bonus_action", false) and has_used_bonus_action:
+			return false
 		return item.get("count", 0) > 0
 	return false
 
@@ -668,214 +928,406 @@ func grant_extra_action(pidx: int) -> bool:
 ## Consome 1 spell slot do nível pedido, ou do primeiro nível superior disponível
 ## (upcast). Não faz nada se spell_level <= 0 ou se não há slots.
 func consume_spell_slot(spell_level: int) -> void:
-	var pidx := get_active_player_index()
-	if pidx < 0 or spell_level <= 0:
-		return
+	_consume_slot(get_active_player_index(), spell_level)
+
+# ── Economia de ações e recursos (ponto único) ──────────────────────────────
+# Regra única de upcast: há slot do nível pedido ou de algum nível acima?
+func has_slot_at_or_above(pidx: int, level: int) -> bool:
+	if pidx < 0 or level <= 0:
+		return level <= 0
 	var slots: Array = PLAYERS[pidx].get("spell_slots", [0, 0, 0, 0, 0, 0])
-	for i in range(spell_level - 1, slots.size()):
+	for i in range(level - 1, slots.size()):
+		if slots[i] > 0:
+			return true
+	return false
+
+# Gasta 1 slot (com upcast). Devolve o nível gasto (0 = nenhum).
+func _consume_slot(pidx: int, level: int) -> int:
+	if pidx < 0 or level <= 0:
+		return 0
+	var slots: Array = PLAYERS[pidx].get("spell_slots", [0, 0, 0, 0, 0, 0])
+	for i in range(level - 1, slots.size()):
 		if slots[i] > 0:
 			slots[i] -= 1
 			_log("Slot de %dº nível consumido." % (i + 1), "system")
-			return
+			return i + 1
+	return 0
 
-func get_active_tab_items() -> Array:
-	var result: Array = []
-	match active_tab:
-		0:
-			for a in tab_action:
-				result.append(a)
-			while result.size() < MAX_SLOTS - 1:
-				result.append(null)
-			result.append(TAB_END_TURN[0])
-		1:
-			for a in tab_habilidades:
-				result.append(a)
-			while result.size() < MAX_SLOTS:
-				result.append(null)
-		2:
-			for item in TAB_ITEMS:
-				result.append(item)
-			while result.size() < MAX_SLOTS:
-				result.append(null)
-	return result
+# Usos por combate de habilidades de classe sem slot (ex.: Segundo Vento).
+# Contados aqui, por herói — nunca no Resource compartilhado da ação (que é
+# duplicado a cada recarga de ações e perderia o gasto).
+var _uses_spent: Dictionary = {}
 
-func move_tab(delta: int) -> void:
-	active_tab = (active_tab + delta + 3) % 3
-	cursor_position = 0
+func _uses_key(pidx: int, action: ActionData) -> String:
+	return "%d:%s" % [pidx, action.label]
 
-func move_cursor_tab(delta: int) -> void:
-	var items := get_active_tab_items()
-	var new_pos := cursor_position + delta
+func uses_left(pidx: int, action: ActionData) -> int:
+	if action.max_pp <= 0 or action.spell_slot_level > 0:
+		return 1   # sem limite por uso (magias são limitadas só por slots, BG3)
+	return action.max_pp - int(_uses_spent.get(_uses_key(pidx, action), 0))
 
-	# pula slots nulos na direção do movimento
-	while new_pos >= 0 and new_pos < items.size() and items[new_pos] == null:
-		new_pos += delta
+# Gasta o custo de uma ação do herói ativo: economia (Ação / Ação Bônus) das
+# ações táticas, slot (upcast), Ki, usos e pool. A economia de ATAQUES é gasta
+# em finalize_attack (preserva Fúria/ataque extra).
+func spend_action_cost(action: ActionData) -> void:
+	remove_condition(active_index, "invisible")   # gastar Ação ou Ação Bônus acaba a Invisibilidade (BG3)
+	var pidx: int = get_active_player_index()
+	if action.action_type != ActionData.Type.ATTACK:
+		if action.bonus_action:
+			has_used_bonus_action = true
+		elif action is AcaoEsconder or action is AcaoDesengajar:
+			has_attacked = true
+	if pidx < 0:
+		return
+	_consume_slot(pidx, action.spell_slot_level)
+	if action.ki_cost > 0:
+		PLAYERS[pidx]["ki"] = maxi(0, int(PLAYERS[pidx].get("ki", 0)) - action.ki_cost)
+	if action.max_pp > 0 and action.spell_slot_level <= 0:
+		var k: String = _uses_key(pidx, action)
+		_uses_spent[k] = int(_uses_spent.get(k, 0)) + 1
+	if action.pool_key != "":
+		_spend_pool(pidx, action.pool_key, action.pool_cost)
 
-	if new_pos < 0:
-		active_tab = (active_tab - 1 + 3) % 3
-		var new_items := get_active_tab_items()
-		cursor_position = new_items.size() - 1
-		while cursor_position > 0 and new_items[cursor_position] == null:
-			cursor_position -= 1
-	elif new_pos >= items.size():
-		active_tab = (active_tab + 1) % 3
-		cursor_position = 0
-		var new_items := get_active_tab_items()
-		while cursor_position < new_items.size() - 1 and new_items[cursor_position] == null:
-			cursor_position += 1
-	else:
-		cursor_position = new_pos
+# Gasta Ki do herói no índice da fila (ex.: Devolver Projétil). false se faltar.
+func spend_ki(idx: int, amount: int) -> bool:
+	var pidx: int = player_index_of(idx)
+	if pidx < 0 or int(PLAYERS[pidx].get("ki", 0)) < amount:
+		return false
+	PLAYERS[pidx]["ki"] = int(PLAYERS[pidx]["ki"]) - amount
+	return true
 
-func advance_turn() -> void:
-	battle_stats["turns"] = battle_stats.get("turns", 0) + 1
-	var next: int = (active_index + 1) % TURN_QUEUE.size()
+# Segundo Vento (BG3): Ação Bônus, cura 1d10 + nível de Guerreiro, 1x por descanso.
+func use_second_wind(action: ActionData) -> int:
+	if not is_item_available(action):
+		return 0
+	var pidx: int = get_active_player_index()
+	spend_action_cost(action)
+	var before: int = get_hp(active_index)
+	_set_hp(active_index, before + DiceRoller.roll(1, 10) + int(PLAYERS[pidx].get("level", 1)))
+	var healed: int = get_hp(active_index) - before
+	_log("%s usa Segundo Vento! +%d HP" % [PLAYERS[pidx]["name"], healed], "heal")
+	return healed
+
+# Passo do Vento: Disparada (BG3): Ação Bônus + 1 Ki, dobra o deslocamento.
+func use_step_of_the_wind(action: ActionData) -> bool:
+	if not is_item_available(action):
+		_log("Ki ou Ação Bônus insuficiente!", "miss")
+		return false
+	var pidx: int = get_active_player_index()
+	spend_action_cost(action)
+	move_points_remaining += int(PLAYERS[pidx].get("speed", 6))
+	_log("%s usa Passo do Vento! Movimento dobrado." % PLAYERS[pidx]["name"], "status")
+	return true
+
+# Próximo combatente vivo depois de `idx` (circular).
+func _next_alive_after(idx: int) -> int:
+	var next: int = (idx + 1) % TURN_QUEUE.size()
 	var guard: int = 0
 	while dead_indices.has(next) and guard < TURN_QUEUE.size():
 		next = (next + 1) % TURN_QUEUE.size()
 		guard += 1
-	var stun_guard: int = 0
-	while stun_guard < TURN_QUEUE.size():
-		var status: Dictionary = combatant_statuses[next]
-		if status.get("poison", 0) > 0:
-			status["poison"] -= 1
-			var poison_dmg: int = DiceRoller.roll(1, 4)
-			if TURN_QUEUE[next]["is_player"]:
-				var pidx: int = _player_index_by_name(TURN_QUEUE[next]["name"])
-				if pidx >= 0:
-					PLAYERS[pidx]["hp"] = maxi(0, PLAYERS[pidx]["hp"] - poison_dmg)
-					if PLAYERS[pidx]["hp"] <= 0:
-						_on_death(next)
-			else:
-				var cname: String = TURN_QUEUE[next]["name"]
-				enemy_hp[cname] = maxi(0, enemy_hp.get(cname, 0) - poison_dmg)
-				if enemy_hp[cname] <= 0:
-					_on_death(next)
-			context_message = "%s took %d poison damage!" % [TURN_QUEUE[next]["name"], poison_dmg]
-			_log("%s recebeu %d de dano de veneno" % [TURN_QUEUE[next]["name"], poison_dmg], "status")
-			_register_damage_floater(next, poison_dmg, Color(0.55, 0.75, 0.20), "Veneno")
-		# Burning: 1d4 de Fogo no início do turno; usa o mesmo canal de floater
-		# (pending_surface_hits) que o dano de superfície.
-		if status.get("burning", 0) > 0:
-			status["burning"] -= 1
-			var burn_dmg: int = DiceRoller.roll(1, 4)
-			_register_damage_floater(next, burn_dmg, ActionData.damage_type_color(ActionData.DamageType.FIRE), "Fogo")
-			_deal_damage_to_combatant(next, burn_dmg)
-			context_message = "%s está em chamas! -%d HP" % [TURN_QUEUE[next]["name"], burn_dmg]
-			_log("%s sofreu %d de dano de Fogo (Em Chamas)" % [TURN_QUEUE[next]["name"], burn_dmg], "dmg")
-		if dead_indices.has(next):
-			var skip: int = 0
-			next = (next + 1) % TURN_QUEUE.size()
-			while dead_indices.has(next) and skip < TURN_QUEUE.size():
-				next = (next + 1) % TURN_QUEUE.size()
-				skip += 1
-			stun_guard += 1
+	return next
+
+# Decrementa a duração de uma condição; ao chegar a 0 ela sai (com seus dados
+# associados) pela via única remove_condition.
+func _decay_condition(idx: int, key: String) -> void:
+	var v: int = int(combatant_statuses[idx].get(key, 0))
+	if v <= 0:
+		return
+	if v - 1 <= 0:
+		remove_condition(idx, key)
+	else:
+		combatant_statuses[idx][key] = v - 1
+
+# ── TURNO COMPARTILHADO (BG3) ────────────────────────────────────────────────────────────────────
+# bg3.wiki/wiki/Combat: "Adjacent creatures in the turn order share their turn order position and
+# can act interchangeably"; máximo de 10 criaturas por posição. Decisão do projeto: só HERÓIS
+# agrupam (heróis vivos consecutivos na fila); inimigos agem um a um. O início de turno (veneno,
+# fogo, atordoamento, Death Save, superfície, reação…) roda POR CRIATURA no começo do bloco; cada
+# herói tem o próprio estado de turno (movimento, Ação, Ação Bônus). "Fim de turno" encerra o bloco.
+const MAX_SHARED_TURN := 10
+
+## Combatentes do turno atual (índices da fila, em ordem): o bloco de heróis, ou só o inimigo.
+var turn_block: Array[int] = []
+var _member_turn: Dictionary = {}   # idx -> estado de turno guardado (membros que não são o ativo)
+var _lost_turn: Dictionary = {}     # idx -> true: perdeu o turno neste bloco (Atordoado, Paralisado, Downed…)
+var _ended_turn: Dictionary = {}    # idx -> true: este herói encerrou o PRÓPRIO turno no bloco atual
+
+# Bloco que COMEÇA em `first`: heróis vivos consecutivos (sem dar a volta no fim da fila); inimigo = sozinho.
+func block_from(first: int) -> Array[int]:
+	var block: Array[int] = [first]
+	if not TURN_QUEUE[first]["is_player"]:
+		return block
+	var cur: int = first + 1
+	while cur < TURN_QUEUE.size() and block.size() < MAX_SHARED_TURN:
+		if dead_indices.has(cur):
+			cur += 1
 			continue
-		if status.get("stun", 0) > 0:
-			status["stun"] -= 1
-			context_message = TURN_QUEUE[next]["name"] + " is stunned and loses their turn!"
-			_log("%s perdeu o turno (atordoado)" % TURN_QUEUE[next]["name"], "status")
-			var skip: int = 0
-			next = (next + 1) % TURN_QUEUE.size()
-			while dead_indices.has(next) and skip < TURN_QUEUE.size():
-				next = (next + 1) % TURN_QUEUE.size()
-				skip += 1
-			stun_guard += 1
-			continue
-		# Paralyzed: perde o turno por completo (mesmo padrão do Atordoado).
-		if status.get("paralyzed", 0) > 0:
-			status["paralyzed"] -= 1
-			context_message = TURN_QUEUE[next]["name"] + " está paralisado e perde o turno!"
-			_log("%s perdeu o turno (paralisado)" % TURN_QUEUE[next]["name"], "status")
-			var skip_p: int = 0
-			next = (next + 1) % TURN_QUEUE.size()
-			while dead_indices.has(next) and skip_p < TURN_QUEUE.size():
-				next = (next + 1) % TURN_QUEUE.size()
-				skip_p += 1
-			stun_guard += 1
-			continue
-		# Downed: rola 1 Death Save e passa o turno (não age).
-		if status.get("downed", false):
-			_process_death_save(next)
-			context_message = TURN_QUEUE[next]["name"] + " está caído — Death Save rolado."
-			var skip: int = 0
-			next = (next + 1) % TURN_QUEUE.size()
-			while dead_indices.has(next) and skip < TURN_QUEUE.size():
-				next = (next + 1) % TURN_QUEUE.size()
-				skip += 1
-			stun_guard += 1
-			continue
-		break
-	# Superfícies: dano no INÍCIO DO TURNO do combatente (1x por turno, correto),
-	# mas o DECAIMENTO de duração ocorre 1x por ROUND. Quando voltamos a um
-	# combatente que já agiu, um novo round começou → decai todas as superfícies.
-	if _acted_this_round.has(next):
-		_acted_this_round.clear()
-		_tick_all_surfaces()
-	_acted_this_round[next] = true
-	_apply_surface_tick(next)
-	# Decrementar buffs que duram N turnos do próprio combatente
-	var next_status: Dictionary = combatant_statuses[next]
-	if next_status.get("raging", 0) > 0:
-		next_status["raging"] -= 1
-	if next_status.get("acid", 0) > 0:
-		next_status["acid"] -= 1
-	if next_status.get("wet", 0) > 0:
-		next_status["wet"] -= 1
-	if next_status.get("poisoned", 0) > 0:
-		next_status["poisoned"] -= 1
-	# Decaimento das novas condições com duração em turnos do próprio combatente.
-	# (burning decai no seu próprio tick; paralyzed no bloco de skip acima.)
-	for _cond in ["blinded", "frightened", "restrained", "invisible", "grappled", "bonus_d4"]:
-		if next_status.get(_cond, 0) > 0:
-			next_status[_cond] -= 1
-	if next_status.get("charmed", 0) > 0:
-		next_status["charmed"] -= 1
-		if next_status["charmed"] <= 0:
-			next_status.erase("charmed_by")
-	if next_status.get("marked", 0) > 0:
-		next_status["marked"] -= 1
-		if next_status["marked"] <= 0:
-			next_status.erase("marked_by")
-			next_status.erase("marked_n")
-			next_status.erase("marked_d")
-	# Oculto quebra se algum inimigo passou a ter linha de visão no início do turno.
-	_break_hidden_if_seen(next)
-	# Prone: levantar no início do turno custa metade do deslocamento máximo.
-	_prone_stand_cost = 0
-	if next_status.get("prone", 0) > 0:
-		next_status.erase("prone")
-		var p_idx: int = _player_index_by_name(TURN_QUEUE[next]["name"]) if TURN_QUEUE[next]["is_player"] else -1
-		var max_spd: int = PLAYERS[p_idx].get("speed", 6) if p_idx >= 0 else 4
-		_prone_stand_cost = max_spd / 2
-		_log("%s se levantou (custo de metade do movimento)" % TURN_QUEUE[next]["name"], "system")
-	active_index = next
-	# Reação reseta no INÍCIO do próprio turno (regra D&D 5e). Disengage também.
-	combatant_statuses[next]["reaction_used"] = false
-	combatant_statuses[next]["disengage"] = false
-	combatant_statuses[next]["disengage_exempt"] = []
-	active_tab = 0
-	cursor_position = 0
-	_refill_move_points()
-	if _prone_stand_cost > 0:
-		move_points_remaining = maxi(0, move_points_remaining - _prone_stand_cost)
-	has_attacked = false
-	has_used_bonus_action = false
-	fury_extra_attack = false
-	_sneak_attack_used_this_turn = false
-	_undo_attack_info.clear()
-	move_cursor = combatant_positions[active_index]
-	if is_player_turn():
+		if not TURN_QUEUE[cur]["is_player"]:
+			break
+		block.append(cur)
+		cur += 1
+	return block
+
+func get_turn_block() -> Array[int]:
+	if turn_block.is_empty():
+		return [active_index]
+	return turn_block
+
+# Membro do bloco em condições de agir: vivo, de pé, sem Atordoado nem Paralisado.
+func _member_can_act(idx: int) -> bool:
+	if dead_indices.has(idx) or is_downed(idx) or _lost_turn.has(idx):
+		return false
+	var st: Dictionary = combatant_statuses[idx]
+	return st.get("stun", 0) <= 0 and st.get("paralyzed", 0) <= 0
+
+# Membros do bloco para quem o jogador pode trocar (inclui o ativo).
+func switchable_members() -> Array[int]:
+	var out: Array[int] = []
+	for m in get_turn_block():
+		if _member_can_act(m):
+			out.append(m)
+	return out
+
+# Troca livremente de herói dentro do bloco (só no turno dos heróis, sem mira nem modo ativo).
+func switch_active_member(idx: int) -> bool:
+	if current_state != State.PLAYER_TURN or idx == active_index:
+		return false
+	if not get_turn_block().has(idx) or not TURN_QUEUE[idx]["is_player"] or not _member_can_act(idx):
+		return false
+	_save_member_turn(active_index)
+	_activate_member(idx)
+	return true
+
+# Passa ao próximo (delta = 1) ou anterior (-1) herói do bloco que ainda NÃO encerrou o turno e pode
+# agir; false se não há outro. (Quem já encerrou se escolhe pelo clique, para cancelar o fim de turno.)
+func cycle_active_member(delta: int) -> bool:
+	var able: Array[int] = pending_members()
+	if able.is_empty() or (able.size() == 1 and able[0] == active_index):
+		return false
+	var pos: int = able.find(active_index)
+	var target: int
+	if pos < 0:   # o ativo já encerrou: vai para o primeiro (ou último) que ainda age
+		target = able[0] if delta > 0 else able[able.size() - 1]
+	else:
+		target = able[posmod(pos + delta, able.size())]
+	return switch_active_member(target)
+
+# ── Fim de turno POR HERÓI (BG3) ─────────────────────────────────────────────────────────────────
+# Cada herói do bloco tem o PRÓPRIO fim de turno (bg3.wiki "Controls": End Turn e Cancel End Turn).
+# Encerrar o do ativo encerra só o dele e o controle passa ao próximo que ainda não encerrou e pode
+# agir; o bloco só termina quando o último herói disponível encerra (END_BLOCK_DONE: quem chamou faz
+# advance_turn()). Enquanto o bloco dura, um herói que encerrou pode cancelar e volta a agir com os
+# recursos que tinha. Efeitos de início de turno seguem por criatura (_begin_member).
+enum EndResult { INVALID, SWITCHED, BLOCK_DONE }
+
+func is_member_ended(idx: int) -> bool:
+	return _ended_turn.has(idx)
+
+func active_ended() -> bool:
+	return _ended_turn.has(active_index)
+
+# Heróis do bloco que podem agir e ainda não encerraram o turno.
+func pending_members() -> Array[int]:
+	var out: Array[int] = []
+	for m in get_turn_block():
+		if _member_can_act(m) and not _ended_turn.has(m):
+			out.append(m)
+	return out
+
+# Próximo herói do bloco (em ordem, dando a volta) que pode agir e não encerrou; -1 se não há.
+func _next_pending_after(idx: int) -> int:
+	var block: Array[int] = get_turn_block()
+	var pos: int = block.find(idx)
+	for k in range(1, block.size() + 1):
+		var m: int = block[posmod(pos + k, block.size())]
+		if m != idx and _member_can_act(m) and not _ended_turn.has(m):
+			return m
+	return -1
+
+# Encerra o turno do herói ativo. BLOCK_DONE = era o último disponível: chame advance_turn().
+func end_member_turn() -> int:
+	if current_state != State.PLAYER_TURN or not TURN_QUEUE[active_index]["is_player"] or active_ended():
+		return EndResult.INVALID
+	_save_member_turn(active_index)
+	_ended_turn[active_index] = true
+	var nxt: int = _next_pending_after(active_index)
+	if nxt < 0:
+		return EndResult.BLOCK_DONE
+	_activate_member(nxt)
+	return EndResult.SWITCHED
+
+# Cancela o fim de turno de `idx` e dá o controle a ele, com o movimento, a Ação e a Ação Bônus que
+# lhe restavam (nada é reiniciado). Só vale enquanto o bloco está em andamento.
+func cancel_member_end(idx: int) -> bool:
+	if current_state != State.PLAYER_TURN or not _ended_turn.has(idx):
+		return false
+	if not get_turn_block().has(idx) or not _member_can_act(idx):
+		return false
+	_ended_turn.erase(idx)
+	if idx != active_index:
+		_save_member_turn(active_index)
+		_activate_member(idx)
+	return true
+
+# O herói ativo ficou incapaz (Downed, Atordoado, Paralisado) no meio do bloco: passa o controle ao
+# próximo disponível. 0 = nada a fazer, 1 = controle passado, 2 = ninguém mais pode agir (advance_turn).
+func pass_control_if_incapable() -> int:
+	if current_state != State.PLAYER_TURN or not TURN_QUEUE[active_index]["is_player"]:
+		return 0
+	if _member_can_act(active_index):
+		return 0
+	var nxt: int = _next_pending_after(active_index)
+	if nxt < 0:
+		return 2
+	_activate_member(nxt)
+	return 1
+
+func _save_member_turn(idx: int) -> void:
+	_member_turn[idx] = {"move": move_points_remaining, "last_move_cost": _last_move_cost,
+		"attacked": has_attacked, "bonus": has_used_bonus_action, "fury_extra": fury_extra_attack,
+		"sneak": _sneak_attack_used_this_turn, "undo_pos": _undo_move_pos,
+		"undo_attack": _undo_attack_info.duplicate()}
+
+# Fixa `idx` como combatente ativo e carrega o estado de turno dele (guardado ou novo).
+func _activate_member(idx: int) -> void:
+	active_index = idx
+	var st: Dictionary = _member_turn.get(idx, {})
+	move_points_remaining = int(st.get("move", 0))
+	_last_move_cost = int(st.get("last_move_cost", 0))
+	has_attacked = bool(st.get("attacked", false))
+	has_used_bonus_action = bool(st.get("bonus", false))
+	fury_extra_attack = bool(st.get("fury_extra", false))
+	_sneak_attack_used_this_turn = bool(st.get("sneak", false))
+	_undo_move_pos = st.get("undo_pos", Vector2i.ZERO)
+	_undo_attack_info = (st.get("undo_attack", {}) as Dictionary).duplicate()
+	move_cursor = combatant_positions[idx]
+	if TURN_QUEUE[idx]["is_player"]:
 		current_state = State.PLAYER_TURN
 		enemy_action_text = ""
-		_load_hero_actions(TURN_QUEUE[active_index]["name"])
+		_load_hero_actions(TURN_QUEUE[idx]["name"])
 	else:
 		current_state = State.ENEMY_TURN
 		_roll_enemy_action()
 
+# Início de turno de UMA criatura: dano de veneno e fogo; devolve false se ela perde o turno
+# (morta pelo DoT, Atordoada, Paralisada ou Downed — que rola 1 Death Save).
+func _start_turn_effects(idx: int) -> bool:
+	var status: Dictionary = combatant_statuses[idx]
+	if status.get("poison", 0) > 0:
+		_decay_condition(idx, "poison")
+		# DoT de veneno: 1d4 de dano POISON (BG3 Simple Toxin) — distinto da
+		# condição "poisoned" (Desvantagem), que não causa dano.
+		var poison_dmg: int = _deal_damage_to_combatant(idx, DiceRoller.roll(1, 4), ActionData.DamageType.POISON)
+		context_message = "%s took %d poison damage!" % [TURN_QUEUE[idx]["name"], poison_dmg]
+		_log("%s recebeu %d de dano de veneno" % [TURN_QUEUE[idx]["name"], poison_dmg], "status")
+		_register_damage_floater(idx, poison_dmg, ActionData.damage_type_color(ActionData.DamageType.POISON), "Veneno")
+	# Burning: 1d4 de Fogo no início do turno; usa o mesmo canal de floater
+	# (pending_surface_hits) que o dano de superfície.
+	if status.get("burning", 0) > 0:
+		_decay_condition(idx, "burning")
+		var burn_dmg: int = _deal_damage_to_combatant(idx, DiceRoller.roll(1, 4), ActionData.DamageType.FIRE)
+		_register_damage_floater(idx, burn_dmg, ActionData.damage_type_color(ActionData.DamageType.FIRE), "Fogo")
+		context_message = "%s está em chamas! -%d HP" % [TURN_QUEUE[idx]["name"], burn_dmg]
+		_log("%s sofreu %d de dano de Fogo (Em Chamas)" % [TURN_QUEUE[idx]["name"], burn_dmg], "dmg")
+	# Perde o turno: morto (pelo DoT), Atordoado, Paralisado ou Downed (rola
+	# 1 Death Save). Cada caso mantém sua regra.
+	var cname: String = TURN_QUEUE[idx]["name"]
+	if dead_indices.has(idx):
+		return false
+	elif status.get("stun", 0) > 0:
+		_decay_condition(idx, "stun")
+		context_message = cname + " is stunned and loses their turn!"
+		_log("%s perdeu o turno (atordoado)" % cname, "status")
+		return false
+	elif status.get("paralyzed", 0) > 0:
+		_decay_condition(idx, "paralyzed")
+		context_message = cname + " está paralisado e perde o turno!"
+		_log("%s perdeu o turno (paralisado)" % cname, "status")
+		return false
+	elif status.get("downed", false):
+		_process_death_save(idx)
+		context_message = cname + " está caído — Death Save rolado."
+		return false
+	return true
+
+# Prepara UMA criatura que vai agir neste turno: superfície sob ela, duração das condições, Oculto,
+# levantar de Prone, reação e Disengage renovados, e o estado de turno novo (movimento, Ação…).
+func _begin_member(idx: int) -> void:
+	# Dano de superfície no INÍCIO DO TURNO do combatente (1x por turno).
+	_apply_surface_tick(idx)
+	# Decrementar buffs que duram N turnos do próprio combatente
+	# (burning/poison decaem no próprio tick; stun/paralyzed no bloco de skip.)
+	for _cond in StatusDefinitions.DECAY_AT_TURN_START:
+		_decay_condition(idx, _cond)
+	# Oculto quebra se algum inimigo passou a ter linha de visão no início do turno.
+	_break_hidden_if_seen(idx)
+	var pidx: int = player_index_of(idx)
+	var speed: int = int(PLAYERS[pidx].get("speed", 6)) if pidx >= 0 else 0
+	# Prone: levantar no início do turno custa metade do deslocamento máximo.
+	_prone_stand_cost = 0
+	if combatant_statuses[idx].get("prone", 0) > 0:
+		remove_condition(idx, "prone")
+		_prone_stand_cost = (int(PLAYERS[pidx].get("speed", 6)) if pidx >= 0 else 4) / 2
+		_log("%s se levantou (custo de metade do movimento)" % TURN_QUEUE[idx]["name"], "system")
+	# Reação reseta no INÍCIO do próprio turno (regra D&D 5e). Disengage também.
+	combatant_statuses[idx]["reaction_used"] = false
+	combatant_statuses[idx]["disengage"] = false
+	# Bárbaro: entra em Fúria ao começar o turno com menos de 50% de HP; em Fúria tem o ataque extra.
+	var fury_extra := false
+	if pidx >= 0 and PLAYERS[pidx].get("class", "") == "Barbarian":
+		if combatant_statuses[idx].get("fury", 0) > 0:
+			fury_extra = true
+		elif float(PLAYERS[pidx]["hp"]) / float(PLAYERS[pidx]["max_hp"]) < 0.5:
+			apply_condition(idx, "fury", 1)
+			_log("%s entra em Fúria!" % TURN_QUEUE[idx]["name"], "status")
+			fury_extra = true
+	_member_turn[idx] = {"move": maxi(0, speed - _prone_stand_cost), "last_move_cost": 0, "attacked": false,
+		"bonus": false, "fury_extra": fury_extra, "sneak": false, "undo_pos": Vector2i.ZERO, "undo_attack": {}}
+
+func advance_turn() -> void:
+	turn_forced_end = false
+	battle_stats["turns"] = battle_stats.get("turns", 0) + 1
+	var last: int = turn_block.back() if not turn_block.is_empty() else active_index
+	var next: int = _next_alive_after(last)
+	var block: Array[int] = block_from(next)
+	var able: Array[int] = []
+	var guard: int = 0
+	while guard < TURN_QUEUE.size():
+		block = block_from(next)
+		able.clear()
+		for m in block:
+			if _start_turn_effects(m):
+				able.append(m)
+		if not able.is_empty():
+			break
+		next = _next_alive_after(block.back())
+		guard += 1
+	if able.is_empty():
+		able.append(block[0])
+	# Superfícies: o DECAIMENTO de duração ocorre 1x por ROUND. Quando voltamos a um combatente
+	# que já agiu, um novo round começou → decai todas as superfícies.
+	if _acted_this_round.has(block[0]):
+		_acted_this_round.clear()
+		_tick_all_surfaces()
+	for m in block:
+		_acted_this_round[m] = true
+	turn_block = block
+	_member_turn.clear()
+	_lost_turn.clear()
+	_ended_turn.clear()
+	for m in block:
+		if not able.has(m):
+			_lost_turn[m] = true    # perdeu o turno: segue no bloco, mas não recebe o controle
+	for m in able:
+		_begin_member(m)
+	_activate_member(able[0])
+
 func enter_move_mode() -> void:
-	if current_state != State.PLAYER_TURN or move_points_remaining <= 0:
+	if current_state != State.PLAYER_TURN or move_points_remaining <= 0 or active_ended():
 		return
 	move_cursor = combatant_positions[active_index]
+	cursor_tile = move_cursor
 	current_state = State.MOVE_MODE
 
 # Reabastece os pontos de movimento do combatente ativo. Para herois usa o
@@ -902,15 +1354,8 @@ func apply_dash() -> void:
 		return
 	move_points_remaining += int(PLAYERS[pidx]["speed"])
 	has_attacked = true
+	remove_condition(active_index, "invisible")
 	_log("%s usa Dash! Movimento dobrado." % PLAYERS[pidx]["name"], "status")
-
-func move_cursor_grid(delta: Vector2i) -> void:
-	var new_pos := move_cursor + delta
-	new_pos.x = clampi(new_pos.x, 0, grid_cols - 1)
-	new_pos.y = clampi(new_pos.y, 0, grid_rows - 1)
-	if not get_reachable_tiles().has(new_pos):
-		return
-	move_cursor = new_pos
 
 func confirm_move() -> void:
 	_undo_move_pos = combatant_positions[active_index]
@@ -934,35 +1379,36 @@ func apply_surface_on_enter(combatant_idx: int, pos: Vector2i) -> void:
 	var cname: String = TURN_QUEUE[combatant_idx]["name"]
 	match s_type:
 		SurfaceType.Type.FIRE:
-			var fdmg: int = DiceRoller.roll(1, 4)
+			var fdmg: int = _deal_damage_to_combatant(combatant_idx, DiceRoller.roll(1, 4), ActionData.DamageType.FIRE)
 			_register_damage_floater(combatant_idx, fdmg, ActionData.damage_type_color(ActionData.DamageType.FIRE), "Fogo")
-			_deal_damage_to_combatant(combatant_idx, fdmg)
 			_ignite(combatant_idx)  # Em Chamas: 1d4/turno por 2 turnos
 			_log("%s entrou no fogo! -%d HP (Em Chamas)" % [cname, fdmg], "dmg")
 		SurfaceType.Type.ICE:
-			_apply_ice_prone_save(combatant_idx)
+			# CD guardada pelo Gelo de magia; armadilha ou superfície sem conjurador: 12.
+			var ice_dc: int = int(tile_surfaces[pos].get("dc", 0))
+			_apply_ice_prone_save(combatant_idx, ice_dc if ice_dc > 0 else 12)
 		SurfaceType.Type.WATER:
-			combatant_statuses[combatant_idx]["wet"] = 3
-			# Água apaga o fogo (BG3): cancela Em Chamas.
-			if combatant_statuses[combatant_idx].get("burning", 0) > 0:
-				combatant_statuses[combatant_idx].erase("burning")
+			var was_burning: bool = combatant_statuses[combatant_idx].get("burning", 0) > 0
+			apply_condition(combatant_idx, "wet", 3)   # Wet apaga Burning (BG3)
+			if was_burning:
 				_log("%s foi apagado pela água (não está mais Em Chamas)" % cname, "status")
-			_log("%s ficou molhado (vulnerável a Raio e Frio)" % cname, "status")
+			_log("%s ficou molhado (vulnerável a Raio e Frio, resistente a Fogo)" % cname, "status")
 		SurfaceType.Type.ELECTRIFIED_WATER:
-			var edmg: int = DiceRoller.roll(1, 4)
-			_register_damage_floater(combatant_idx, edmg, ActionData.damage_type_color(ActionData.DamageType.THUNDER), "Raio")
-			_deal_damage_to_combatant(combatant_idx, edmg)
+			var edmg: int = _deal_damage_to_combatant(combatant_idx, DiceRoller.roll(1, 4), ActionData.DamageType.LIGHTNING)
+			_register_damage_floater(combatant_idx, edmg, ActionData.damage_type_color(ActionData.DamageType.LIGHTNING), "Raio")
 			_log("%s foi eletrocutado! -%d HP" % [cname, edmg], "dmg")
 		SurfaceType.Type.ACID:
-			combatant_statuses[combatant_idx]["acid"] = 2
+			apply_condition(combatant_idx, "acid", 2)
 			_log("%s foi banhado em ácido! -2 CA por 2 turnos" % cname, "status")
 		SurfaceType.Type.POISON:
-			combatant_statuses[combatant_idx]["poisoned"] = 3
-			_log("%s foi envenenado (desvantagem em ataques)" % cname, "status")
+			_apply_poison_cloud_save(combatant_idx, 1)
+		SurfaceType.Type.STEAM:
+			# Vapor aplica Wet (bg3.wiki/wiki/Steam_Cloud); Wet apaga Em Chamas.
+			apply_condition(combatant_idx, "wet", 3)
+			_log("%s foi envolvido pelo vapor (Molhado)" % cname, "status")
 		SurfaceType.Type.CLOUD_OF_DAGGERS:
-			var cdmg: int = DiceRoller.roll(4, 4)
-			_register_damage_floater(combatant_idx, cdmg, ActionData.damage_type_color(ActionData.DamageType.PHYSICAL), "Cortante")
-			_deal_damage_to_combatant(combatant_idx, cdmg)
+			var cdmg: int = _deal_damage_to_combatant(combatant_idx, DiceRoller.roll(4, 4), ActionData.DamageType.SLASHING)
+			_register_damage_floater(combatant_idx, cdmg, ActionData.damage_type_color(ActionData.DamageType.SLASHING), "Cortante")
 			_log("%s entrou na Nuvem de Adagas! -%d HP (Slashing)" % [cname, cdmg], "dmg")
 
 func cancel_confirmed_move() -> bool:
@@ -984,150 +1430,151 @@ func _check_trap(combatant_idx: int, pos: Vector2i) -> void:
 	if tile.effect == TerrainTile.EffectType.TRAP_INACTIVE:
 		tile.effect = TerrainTile.EffectType.TRAP_ACTIVE
 		var cname: String = TURN_QUEUE[combatant_idx]["name"]
-		var trap_dmg: int = DiceRoller.roll(2, 4)
-		if TURN_QUEUE[combatant_idx]["is_player"]:
-			var pidx := get_active_player_index()
-			if pidx >= 0:
-				PLAYERS[pidx]["hp"] = maxi(0, PLAYERS[pidx]["hp"] - trap_dmg)
-				if PLAYERS[pidx]["hp"] <= 0:
-					_on_death(combatant_idx)
-		else:
-			var new_hp: int = maxi(0, enemy_hp.get(cname, 30) - trap_dmg)
-			enemy_hp[cname] = new_hp
-			if new_hp <= 0:
-				_on_death(combatant_idx)
+		# Dardo envenenado: 2d4 PIERCING em quem pisou (não no ativo) + DoT de veneno.
+		var trap_dmg: int = _deal_damage_to_combatant(combatant_idx, DiceRoller.roll(2, 4), ActionData.DamageType.PIERCING)
 		context_message = "%s triggered a trap! -%d HP" % [cname, trap_dmg]
 		_log("%s ativou uma armadilha! -%d HP e envenenado" % [cname, trap_dmg], "status")
-		_register_damage_floater(combatant_idx, trap_dmg, ActionData.damage_type_color(ActionData.DamageType.PHYSICAL), "Armadilha")
-		combatant_statuses[combatant_idx]["poison"] = 3
+		_register_damage_floater(combatant_idx, trap_dmg, ActionData.damage_type_color(ActionData.DamageType.PIERCING), "Armadilha")
+		apply_condition(combatant_idx, "poison", 3)
 		# A armadilha deixa uma nuvem de Veneno persistente no tile.
 		_add_surface(pos, SurfaceType.Type.POISON)
 
-# Saving throw de DEX (DC 12) ao entrar em superfície de Gelo. Falha → Prone.
-func _apply_ice_prone_save(combatant_idx: int) -> void:
-	var dc := 12
+# Nuvem de Veneno (BG3): save de CON (CD 11, veneno básico; o valor varia por fonte) ou Envenenado
+# por 1 turno (Desvantagem em ataques e testes de habilidade). A nuvem não causa dano.
+const POISON_CLOUD_DC := 11
+func _apply_poison_cloud_save(combatant_idx: int, duration: int) -> void:
+	var con_save_action := ActionData.new()
+	con_save_action.save_attribute = ActionData.DamageAttribute.CON
+	var res: Dictionary = _resolve_saving_throw(combatant_idx, POISON_CLOUD_DC, con_save_action)
+	var cname: String = TURN_QUEUE[combatant_idx]["name"]
+	if res["saved"]:
+		_log("%s resistiu à nuvem de veneno (CON %d vs CD %d)" % [cname, res["total"], POISON_CLOUD_DC], "status")
+	else:
+		apply_condition(combatant_idx, "poisoned", duration)
+		_log("%s foi envenenado pela nuvem (desvantagem em ataques)" % cname, "status")
+
+# Saving throw de DEX ao entrar em superfície de Gelo (ou ao ser criada sob a criatura). Falha → Prone.
+func _apply_ice_prone_save(combatant_idx: int, dc: int = 12) -> void:
 	var dex_save_action := ActionData.new()
 	dex_save_action.save_attribute = ActionData.DamageAttribute.DEX
 	var save_result: Dictionary = _resolve_saving_throw(combatant_idx, dc, dex_save_action)
 	if not save_result["saved"]:
-		combatant_statuses[combatant_idx]["prone"] = 1
-		_break_concentration(combatant_idx)  # Prone quebra concentração (BG3)
+		apply_condition(combatant_idx, "prone", 1)   # Prone quebra concentração (BG3)
 		var cname: String = TURN_QUEUE[combatant_idx]["name"]
 		_log("%s escorregou no gelo e caiu (Prone)!" % cname, "status")
+
+# ── MOVIMENTO: pathfinder único (heróis e inimigos) ──────────────────────────
+# D&D 2024 "Playing on a Grid": 8 direções, cada casa entrada custa 1 (a diagonal
+# também); terreno difícil custa 2 (_tile_cost). A diagonal não cruza a quina de um
+# objeto que enche a casa (Obstáculo, Estátua, Cobertura); criaturas não a bloqueiam.
+const MOVE_DIRS: Array[Vector2i] = [
+	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
+	Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1),
+]
+
+func _in_grid(pos: Vector2i) -> bool:
+	return pos.x >= 0 and pos.x < grid_cols and pos.y >= 0 and pos.y < grid_rows
+
+# Objeto que enche a casa: bloqueia o movimento e a diagonal pela quina.
+func _fills_square(tile: TerrainTile) -> bool:
+	return tile.object == TerrainTile.ObjectType.OBSTACLE \
+		or tile.object == TerrainTile.ObjectType.STATUE \
+		or tile.object == TerrainTile.ObjectType.COVER
+
+# Passo de `from` para `to` (casas vizinhas, em qualquer das 8 direções) permitido pelo terreno.
+func _step_allowed(from: Vector2i, to: Vector2i) -> bool:
+	if not _in_grid(to):
+		return false
+	var tile: TerrainTile = tile_data_map[to.x][to.y]
+	if tile.is_void() or _fills_square(tile):
+		return false
+	var d: Vector2i = to - from
+	if d.x != 0 and d.y != 0:
+		for corner in [Vector2i(from.x + d.x, from.y), Vector2i(from.x, from.y + d.y)]:
+			if _in_grid(corner) and _fills_square(tile_data_map[corner.x][corner.y]):
+				return false
+	return true
+
+# Uma criatura em `pos` impede `mover_idx` de atravessar a casa? Só as do lado oposto: aliados
+# (vivos ou Downed) são atravessáveis, sem custo extra (D&D 2024: o espaço de outra criatura é
+# terreno difícil "exceto se for Tiny ou seu aliado"). Ninguém termina o movimento sobre outra
+# criatura (_occupied_by_living_other). Inimigos incapacitados continuam bloqueando (decisão D4).
+func _creature_blocks_step(mover_idx: int, pos: Vector2i) -> bool:
+	var mover_is_player: bool = TURN_QUEUE[mover_idx]["is_player"]
+	for i in range(combatant_positions.size()):
+		if i == mover_idx or dead_indices.has(i) or combatant_positions[i] != pos:
+			continue
+		if TURN_QUEUE[i]["is_player"] != mover_is_player:
+			return true
+	return false
+
+# Há alguém vivo (além de `mover_idx`) na casa? Ninguém termina o movimento numa casa ocupada.
+func _occupied_by_living_other(mover_idx: int, pos: Vector2i) -> bool:
+	for i in range(combatant_positions.size()):
+		if i != mover_idx and not dead_indices.has(i) and combatant_positions[i] == pos:
+			return true
+	return false
+
+# Busca de menor custo a partir da casa de `mover_idx`, limitada por `budget`.
+# {"cost": {pos: custo acumulado}, "from": {pos: casa anterior}}; a origem custa 0.
+func _search_movement(mover_idx: int, budget: int) -> Dictionary:
+	var origin: Vector2i = combatant_positions[mover_idx]
+	var cost: Dictionary = {origin: 0}
+	var came: Dictionary = {origin: origin}
+	var frontier: Array[Vector2i] = [origin]
+	while not frontier.is_empty():
+		var cur: Vector2i = frontier.pop_front()
+		for d in MOVE_DIRS:
+			var nxt: Vector2i = cur + d
+			if not _step_allowed(cur, nxt) or _creature_blocks_step(mover_idx, nxt):
+				continue
+			var new_cost: int = int(cost[cur]) + _tile_cost(nxt)
+			if new_cost > budget:
+				continue
+			if cost.has(nxt) and int(cost[nxt]) <= new_cost:
+				continue
+			cost[nxt] = new_cost
+			came[nxt] = cur
+			frontier.append(nxt)
+	return {"cost": cost, "from": came}
+
+# Caminho (sem a origem) até `dest` dentro de uma busca de _search_movement.
+func _path_from_search(search: Dictionary, dest: Vector2i) -> Array[Vector2i]:
+	var path: Array[Vector2i] = []
+	var came: Dictionary = search["from"]
+	if not came.has(dest):
+		return path
+	var step: Vector2i = dest
+	while came[step] != step:
+		path.push_front(step)
+		step = came[step]
+	return path
 
 func get_path_to(destination: Vector2i) -> Array[Vector2i]:
 	var origin: Vector2i = combatant_positions[active_index]
 	if origin == destination:
 		return []
-	var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
-	var came_from: Dictionary = {}
-	came_from[origin] = origin
-	var frontier: Array[Vector2i] = [origin]
-	while not frontier.is_empty():
-		var cur: Vector2i = frontier.pop_front()
-		if cur == destination:
-			break
-		for d in dirs:
-			var nxt: Vector2i = cur + d
-			if nxt.x < 0 or nxt.x >= grid_cols or nxt.y < 0 or nxt.y >= grid_rows:
-				continue
-			if came_from.has(nxt):
-				continue
-			var t: TerrainTile = tile_data_map[nxt.x][nxt.y]
-			if t.is_void():
-				continue
-			if t.object == TerrainTile.ObjectType.OBSTACLE:
-				continue
-			var has_combatant := false
-			for i in range(combatant_positions.size()):
-				if i == active_index:
-					continue
-				if combatant_positions[i] == nxt:
-					has_combatant = true
-					break
-			if has_combatant:
-				continue
-			came_from[nxt] = cur
-			frontier.append(nxt)
-	if not came_from.has(destination):
+	var search: Dictionary = _search_movement(active_index, move_points_remaining)
+	if not search["from"].has(destination):
 		return [destination]
-	var path: Array[Vector2i] = []
-	var step: Vector2i = destination
-	while step != origin:
-		path.push_front(step)
-		step = came_from[step]
-	return path
+	return _path_from_search(search, destination)
 
 func get_reachable_tiles() -> Dictionary:
 	var origin: Vector2i = combatant_positions[active_index]
-	# Condições que impedem totalmente o movimento (BG3/D&D).
+	# Condições que impedem totalmente o movimento (BG3/D&D). Amedrontado: a página do BG3 diz
+	# "Cannot move" (bg3.wiki/wiki/Frightened), então não anda — nem se afastando da fonte.
 	var ms: Dictionary = combatant_statuses[active_index]
 	if ms.get("paralyzed", 0) > 0 or ms.get("restrained", 0) > 0 \
-			or ms.get("grappled", 0) > 0:
+			or ms.get("grappled", 0) > 0 or ms.get("frightened", 0) > 0:
 		return {}
 	# Limite = pontos de movimento RESTANTES no turno (movimento dividido).
-	var spd: int = move_points_remaining
-	var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
-	var cost_map: Dictionary = {}
-	cost_map[origin] = 0
-	var frontier: Array[Vector2i] = [origin]
-	while not frontier.is_empty():
-		var cur: Vector2i = frontier.pop_front()
-		var cur_cost: int = cost_map[cur]
-		for d in dirs:
-			var nxt: Vector2i = cur + d
-			if nxt.x < 0 or nxt.x >= grid_cols or nxt.y < 0 or nxt.y >= grid_rows:
-				continue
-			var tile: TerrainTile = tile_data_map[nxt.x][nxt.y]
-			if tile.is_void():
-				continue
-			if tile.object == TerrainTile.ObjectType.OBSTACLE:
-				continue
-			var has_combatant := false
-			for i in range(combatant_positions.size()):
-				if i == active_index:  
-					continue
-				if dead_indices.has(i):
-					continue
-				if combatant_positions[i] == nxt:
-					has_combatant = true
-					break
-			if has_combatant:
-				continue  
-			var new_cost: int = cur_cost + _tile_cost(nxt)
-			if new_cost > spd:
-				continue
-			if cost_map.has(nxt) and cost_map[nxt] <= new_cost:
-				continue
-			cost_map[nxt] = new_cost
-			frontier.append(nxt)
+	var search: Dictionary = _search_movement(active_index, move_points_remaining)
+	# Valor = custo acumulado até a casa (usado por confirm_move para deduzir o exato
+	# dos pontos restantes); quem só testa alcance usa .has()/.keys().
 	var result: Dictionary = {}
-	for pos in cost_map.keys():
-		var blocked := false
-		for i in range(combatant_positions.size()):
-			if i == active_index or dead_indices.has(i):
-				continue
-			if combatant_positions[i] == pos:
-				blocked = true
-				break
-		if not blocked:
-			# Valor = custo acumulado ate a tile (usado por confirm_move para
-			# deduzir o exato dos pontos restantes). Callers que so testam
-			# alcance usam .has()/.keys(), entao o valor nao os afeta.
-			result[pos] = cost_map[pos]
-	# Amedrontado (BG3/D&D): pode mover, mas não para tiles que o aproximem da
-	# fonte do medo. Sem fonte registrada, apenas não bloqueia.
-	if ms.get("frightened", 0) > 0:
-		var src_idx: int = ms.get("frightened_by", -1)
-		if src_idx >= 0 and src_idx < combatant_positions.size() and not dead_indices.has(src_idx):
-			var src: Vector2i = combatant_positions[src_idx]
-			var origin_dist: int = abs(origin.x - src.x) + abs(origin.y - src.y)
-			var filtered: Dictionary = {}
-			for pos in result.keys():
-				var pos_dist: int = abs(pos.x - src.x) + abs(pos.y - src.y)
-				if pos_dist >= origin_dist:
-					filtered[pos] = result[pos]
-			result = filtered
+	for pos in search["cost"].keys():
+		if pos == origin or not _occupied_by_living_other(active_index, pos):
+			result[pos] = search["cost"][pos]
 	return result
 
 
@@ -1140,15 +1587,18 @@ var concentration_by_caster: Dictionary = {}  # queue_idx (int) -> { "label": St
 var pending_surface_hits: Array = []  # {target_idx, damage, label} — read by BattleScene for floaters
 var _acted_this_round: Dictionary = {}  # queue_idx -> true; detecta limite de round p/ decair superfícies 1x/round
 var _prone_stand_cost: int = 0
+## Prone no próprio turno (Gelo): o turno acaba; BattleScene chama advance_turn e este flag zera lá.
+var turn_forced_end: bool = false
 var combat_log: Array = []
 var pending_deaths: Array[int] = []
+var pending_downed: Array[int] = []   # heróis que acabaram de ficar Downed (BattleScene drena e vibra)
 
 func _get_active_behavior() -> Dictionary:
 	var enemy := get_active_combatant()
 	var enemy_type: String = enemy.get("type", "Goblin")
 	var edata := ALL_ENEMIES.get(enemy_type, null) as EnemyData
 	if edata == null or active_enemy_action_idx >= edata.action_behaviors.size():
-		return {"range": 1, "damage_mult": 1.0, "aoe_radius": 0,
+		return {"range": 1, "damage_mult": 1.0, "aoe_ft": 0,
 				"is_self_buff": false, "is_flee": false,
 				"applies_status": "", "status_chance": 0.0,
 				"buff_type": "", "buff_value": 0, "buff_turns": 0}
@@ -1185,7 +1635,7 @@ func get_enemy_move_path() -> Array[Vector2i]:
 		if TURN_QUEUE[i]["is_player"] and not dead_indices.has(i):
 			if i == charmer:
 				continue  # Charmed: não persegue quem o encantou
-			var d := absi(combatant_positions[i].x - origin.x) + absi(combatant_positions[i].y - origin.y)
+			var d := king_dist(combatant_positions[i], origin)
 			if d < best_dist:
 				best_dist = d
 				target = combatant_positions[i]
@@ -1193,116 +1643,105 @@ func get_enemy_move_path() -> Array[Vector2i]:
 	if best_dist == 99999:
 		return []
 
+	var search: Dictionary = _search_movement(active_index, spd)
+	var dest: Vector2i
 	if "Fleeing" in enemy_action_text:
-		return _trim_path_end(_enemy_path_flee(origin, target, spd))
-
-	var attack_range := _enemy_action_range()
-
-	if best_dist <= attack_range:
-		if randf() < 0.65:
-			return []
-		return _trim_path_end(_enemy_path_reposition(origin, target, attack_range, spd))
-
-	return _trim_path_end(_enemy_path_approach(origin, target, attack_range, spd))
-
-func _trim_path_end(path: Array[Vector2i]) -> Array[Vector2i]:
-	while not path.is_empty():
-		var last: Vector2i = path[-1]
-		var blocked := false
-		for i in range(combatant_positions.size()):
-			if i != active_index and combatant_positions[i] == last:
-				blocked = true
-				break
-		if blocked:
-			path.pop_back()
+		dest = _enemy_flee_tile(search, target)
+	else:
+		var attack_range := _enemy_action_range()
+		if best_dist <= attack_range:
+			if randf() < 0.65:
+				return []
+			dest = _enemy_reposition_tile(search, target, attack_range)
 		else:
-			break
-	return path
+			dest = _enemy_approach_tile(search, target, attack_range)
+	return _path_from_search(search, dest)
 
-func _enemy_path_approach(origin: Vector2i, target: Vector2i, stop_range: int, spd: int) -> Array[Vector2i]:
-	var path: Array[Vector2i] = []
-	var cur := origin
-	for _s in range(spd):
-		var dx := target.x - cur.x
-		var dy := target.y - cur.y
-		if absi(dx) + absi(dy) <= stop_range:
-			break
-		var primary := Vector2i(signi(dx), 0) if absi(dx) >= absi(dy) else Vector2i(0, signi(dy))
-		var next := Vector2i(
-			clampi(cur.x + primary.x, 0, grid_cols - 1),
-			clampi(cur.y + primary.y, 0, grid_rows - 1)
-		)
-		if _is_occupied_by_other(next):
-			var secondary := Vector2i(0, signi(dy)) if absi(dx) >= absi(dy) else Vector2i(signi(dx), 0)
-			if secondary == Vector2i.ZERO:
-				break
-			next = Vector2i(
-				clampi(cur.x + secondary.x, 0, grid_cols - 1),
-				clampi(cur.y + secondary.y, 0, grid_rows - 1)
-			)
-			if _is_occupied_by_other(next):
-				break
-		cur = next
-		path.append(cur)
-	return path
+# Casas onde o inimigo pode TERMINAR o movimento (alcançáveis, livres, fora a origem).
+func _enemy_end_tiles(search: Dictionary) -> Array[Vector2i]:
+	var tiles: Array[Vector2i] = []
+	for pos in search["cost"].keys():
+		if pos != combatant_positions[active_index] and not _occupied_by_living_other(active_index, pos):
+			tiles.append(pos)
+	return tiles
 
-func _enemy_path_flee(origin: Vector2i, target: Vector2i, spd: int) -> Array[Vector2i]:
-	var path: Array[Vector2i] = []
-	var cur := origin
-	for _s in range(spd):
-		var dx := cur.x - target.x
-		var dy := cur.y - target.y
-		if dx == 0 and dy == 0:
-			break
-		var primary := Vector2i(signi(dx), 0) if absi(dx) >= absi(dy) else Vector2i(0, signi(dy))
-		var next := Vector2i(
-			clampi(cur.x + primary.x, 0, grid_cols - 1),
-			clampi(cur.y + primary.y, 0, grid_rows - 1)
-		)
-		if _is_occupied_by_other(next) or next == cur:
-			var secondary := Vector2i(0, signi(dy)) if absi(dx) >= absi(dy) else Vector2i(signi(dx), 0)
-			if secondary == Vector2i.ZERO:
-				break
-			next = Vector2i(
-				clampi(cur.x + secondary.x, 0, grid_cols - 1),
-				clampi(cur.y + secondary.y, 0, grid_rows - 1)
-			)
-			if _is_occupied_by_other(next) or next == cur:
-				break
-		cur = next
-		path.append(cur)
-	return path
+# Pode atacar `target` de `pos`? (corpo a corpo: alcance; à distância: também linha de visão)
+func _enemy_can_hit_from(pos: Vector2i, target: Vector2i, attack_range: int) -> bool:
+	return king_dist(pos, target) <= attack_range and (attack_range <= 1 or _has_los(pos, target))
 
-func _enemy_path_reposition(origin: Vector2i, target: Vector2i, attack_range: int, spd: int) -> Array[Vector2i]:
+# Aproximação: a casa mais barata de onde já dá para atacar (à distância, a mais longe
+# entre as de mesmo custo); senão a casa alcançável mais próxima do alvo andando em
+# volta dos obstáculos (distância de terreno, não em linha reta).
+func _enemy_approach_tile(search: Dictionary, target: Vector2i, attack_range: int) -> Vector2i:
+	var origin: Vector2i = combatant_positions[active_index]
+	var tiles: Array[Vector2i] = _enemy_end_tiles(search)
+	var best := origin
+	var best_cost := 99999
+	var best_far := -1
+	for pos in tiles:
+		if not _enemy_can_hit_from(pos, target, attack_range):
+			continue
+		var c: int = search["cost"][pos]
+		var far: int = king_dist(pos, target)
+		if c < best_cost or (c == best_cost and far > best_far):
+			best = pos
+			best_cost = c
+			best_far = far
+	if best != origin:
+		return best
+	var dist_map: Dictionary = _terrain_distance_map(target)
+	var best_d: int = int(dist_map.get(origin, 99999))
+	for pos in tiles:
+		var td: int = int(dist_map.get(pos, 99999))
+		var c: int = search["cost"][pos]
+		if td < best_d or (td == best_d and best != origin and c < best_cost):
+			best = pos
+			best_d = td
+			best_cost = c
+	return best
+
+# Distância de terreno (custo de andar até `target`) a partir de cada casa, ignorando criaturas.
+func _terrain_distance_map(target: Vector2i) -> Dictionary:
+	var dist: Dictionary = {target: 0}
+	var frontier: Array[Vector2i] = [target]
+	while not frontier.is_empty():
+		var cur: Vector2i = frontier.pop_front()
+		for d in MOVE_DIRS:
+			var nxt: Vector2i = cur + d
+			if not _step_allowed(cur, nxt):
+				continue
+			var nd: int = int(dist[cur]) + _tile_cost(cur)
+			if dist.has(nxt) and int(dist[nxt]) <= nd:
+				continue
+			dist[nxt] = nd
+			frontier.append(nxt)
+	return dist
+
+# Fuga: a casa alcançável mais distante do alvo (mais barata entre as de mesma distância).
+func _enemy_flee_tile(search: Dictionary, target: Vector2i) -> Vector2i:
+	var origin: Vector2i = combatant_positions[active_index]
+	var best := origin
+	var best_far: int = king_dist(origin, target)
+	var best_cost := 0
+	for pos in _enemy_end_tiles(search):
+		var far: int = king_dist(pos, target)
+		var c: int = search["cost"][pos]
+		if far > best_far or (far == best_far and best != origin and c < best_cost):
+			best = pos
+			best_far = far
+			best_cost = c
+	return best
+
+# Reposicionamento: uma casa aleatória a exatamente `attack_range` do alvo, de onde ainda ataca.
+func _enemy_reposition_tile(search: Dictionary, target: Vector2i, attack_range: int) -> Vector2i:
 	var candidates: Array[Vector2i] = []
-	for dx in range(-attack_range, attack_range + 1):
-		for dy in range(-attack_range, attack_range + 1):
-			if absi(dx) + absi(dy) != attack_range:
-				continue
-			var pos: Vector2i = target + Vector2i(dx, dy)
-			if pos.x < 0 or pos.x >= grid_cols or pos.y < 0 or pos.y >= grid_rows:
-				continue
-			if pos == origin:
-				continue
-			var tile: TerrainTile = tile_data_map[pos.x][pos.y]
-			if tile.is_void() or tile.object == TerrainTile.ObjectType.OBSTACLE:
-				continue
-			if _is_occupied_by_other(pos):
-				continue
-			if absi(pos.x - origin.x) + absi(pos.y - origin.y) <= spd:
-				candidates.append(pos)
+	for pos in _enemy_end_tiles(search):
+		if king_dist(pos, target) == attack_range and _enemy_can_hit_from(pos, target, attack_range):
+			candidates.append(pos)
 	if candidates.is_empty():
-		return []
-	var cover_candidates: Array[Vector2i] = []
-	for c in candidates:
-		var tile: TerrainTile = tile_data_map[c.x][c.y]
-		if tile.object == TerrainTile.ObjectType.COVER:
-			cover_candidates.append(c)
-	if not cover_candidates.is_empty():
-		cover_candidates.shuffle()
-		return _enemy_path_approach(origin, cover_candidates[0], 0, spd)
+		return combatant_positions[active_index]
 	candidates.shuffle()
-	return _enemy_path_approach(origin, candidates[0], 0, spd)
+	return candidates[0]
 
 func _get_enemy_projectile_color() -> Color:
 	if "Shadow Bolt" in enemy_action_text:
@@ -1315,6 +1754,15 @@ func _get_enemy_projectile_color() -> Color:
 		return Color(0.75, 0.80, 0.85)
 	return Color.WHITE
 
+# Tipo de dano do comportamento do inimigo ativo: "damage_type" do comportamento
+# ou, na falta, EnemyData.attack_damage_type.
+func _enemy_attack_type(b: Dictionary, attacker_idx: int = -1) -> int:
+	if attacker_idx < 0:
+		attacker_idx = active_index
+	var edata := ALL_ENEMIES.get(TURN_QUEUE[attacker_idx].get("type", ""), null) as EnemyData
+	var fallback: int = edata.attack_damage_type if edata != null else ActionData.DamageType.BLUDGEONING
+	return b.get("damage_type", fallback)
+
 func apply_enemy_attack() -> Dictionary:
 	var b := _get_active_behavior()
 
@@ -1324,19 +1772,18 @@ func apply_enemy_attack() -> Dictionary:
 		_apply_enemy_self_buff(b)
 		return {"target": Vector2i(-1, -1)}
 
-	if b.get("aoe_radius", 0) > 0:
+	if b.get("aoe_ft", 0) > 0:
 		return _apply_enemy_aoe_attack(b)
 
 	var attack_range: int = b.get("range", 1)
 	var my_status: Dictionary = combatant_statuses[active_index]
-	if attack_range > 1 and _tile_at(active_index) == MapGenerator.TileType.ELEVATED:
+	if attack_range > 1 and _is_elevated(active_index):
 		attack_range += 1
+	attack_range = _blind_capped_range(active_index, attack_range)
 
 	var origin: Vector2i = combatant_positions[active_index]
-	var target_idx := -1
-	var best_hp    := 99999
-	var pidx: int
 	var atk_charmer: int = my_status.get("charmed_by", -1) if my_status.get("charmed", 0) > 0 else -1
+	var in_reach: Array[int] = []
 	for i in range(TURN_QUEUE.size()):
 		if TURN_QUEUE[i]["is_player"] and not dead_indices.has(i):
 			if i == atk_charmer:
@@ -1344,43 +1791,56 @@ func apply_enemy_attack() -> Dictionary:
 			var d: int = king_dist(combatant_positions[i], origin)
 			if d <= attack_range:
 				if attack_range == 1 or _has_los(origin, combatant_positions[i]):
-					pidx = _player_index_by_name(TURN_QUEUE[i]["name"])
-					var phpi: int = PLAYERS[pidx]["hp"] if pidx >= 0 else 99999
-					if phpi < best_hp:
-						best_hp    = phpi
-						target_idx = i
+					in_reach.append(i)
+	var target_idx: int = _pick_enemy_target(in_reach)
 	if target_idx == -1:
 		return {"target": Vector2i(-1, -1)}
-	# Mods de Vantagem/Desvantagem da rolagem do inimigo.
-	var _emods: Dictionary = _get_attack_roll_mods(active_index, target_idx, attack_range)
+	return _resolve_enemy_attack(active_index, target_idx, attack_range, b)
 
-	# ── Resolve dados de combate do inimigo ──────────────────────────────────
-	var enemy_type_atk: String = get_active_combatant().get("type", "")
-	var edata_atk := ALL_ENEMIES.get(enemy_type_atk, null) as EnemyData
-	var atk_bonus: int      = edata_atk.attack_bonus      if edata_atk != null else 2
-	var proficiency: int    = edata_atk.proficiency       if edata_atk != null else 2
-	var crit_threshold: int = edata_atk.crit_threshold    if edata_atk != null else 20
-	var dice_count: int     = edata_atk.damage_dice_count if edata_atk != null else 1
-	var dice_sides: int     = edata_atk.damage_dice_sides if edata_atk != null else 6
+# Alvo do ataque do inimigo entre os heróis ao alcance (índices da fila).
+# Regra base: o de MENOR HP (estrito, o primeiro da fila vence o empate). Herói Downed tem 0 HP, então
+# sempre seria o escolhido. DECISÃO DO PROJETO (o BG3 não foi verificado: a wiki é silenciosa sobre a
+# prioridade da IA): quando há ao alcance tanto herói Downed quanto de pé, 50% de chance de escolher o
+# Downed (rolagem pelo DiceRoller, testável); senão a regra base.
+func _pick_enemy_target(in_reach: Array[int]) -> int:
+	var standing: Array[int] = []
+	var downed: Array[int] = []
+	for i in in_reach:
+		(downed if is_downed(i) else standing).append(i)
+	var pool: Array[int] = in_reach
+	if not standing.is_empty() and not downed.is_empty():
+		pool = downed if DiceRoller.roll_d(2) == 1 else standing
+	var best := -1
+	var best_hp := 99999
+	for i in pool:
+		var hp: int = get_hp(i)
+		if hp < best_hp:
+			best_hp = hp
+			best = i
+	return best
+
+# Resolve um ataque de inimigo com atacante e alvo EXPLÍCITOS (ataque normal
+# e Ataque de Oportunidade usam o mesmo caminho e os mesmos stats do inimigo).
+func _resolve_enemy_attack(attacker_idx: int, target_idx: int, attack_range: int, b: Dictionary) -> Dictionary:
+	var my_status: Dictionary = combatant_statuses[attacker_idx]
+	var pidx: int
+	# Mods de Vantagem/Desvantagem da rolagem do inimigo.
+	var _emods: Dictionary = _get_attack_roll_mods(attacker_idx, target_idx, attack_range)
+
+	var prof_e: Dictionary = _enemy_attack_profile(attacker_idx)
+	var atk_bonus: int      = prof_e["atk_bonus"]
+	var proficiency: int    = prof_e["prof"]
+	var crit_threshold: int = prof_e["crit_threshold"]
+	var dice_count: int     = prof_e["dice_count"]
+	var dice_sides: int     = prof_e["dice_sides"]
 	var damage_mult: float  = b.get("damage_mult", 1.0)
 	var raging_bonus: int   = 2 if my_status.get("raging", 0) > 0 else 0  # D&D: +2 (era +3)
-
-	var attack_attr := edata_atk.attack_damage_attribute if edata_atk != null else ActionData.DamageAttribute.STR
-	var attr_val: int = 10
-	match attack_attr:
-		ActionData.DamageAttribute.DEX: attr_val = edata_atk.dexterity    if edata_atk != null else 10
-		ActionData.DamageAttribute.INT: attr_val = edata_atk.intelligence if edata_atk != null else 10
-		ActionData.DamageAttribute.WIS: attr_val = edata_atk.wisdom       if edata_atk != null else 10
-		_:                              attr_val = edata_atk.strength      if edata_atk != null else 10
-	var attr_mod: int = _raw_mod(attr_val)
+	var attr_mod: int       = prof_e["attr_mod"]
 
 	var target_name: String = TURN_QUEUE[target_idx]["name"]
-	pidx = _player_index_by_name(target_name)
-	var target_ac: int = PLAYERS[pidx].get("ac", 10) if pidx >= 0 else 10
-	# Condição Acid (superfície de Ácido): -2 CA.
-	if combatant_statuses[target_idx].get("acid", 0) > 0:
-		target_ac -= 2
-	var attacker_name: String = get_active_combatant()["name"]
+	pidx = player_index_of(target_idx)
+	var target_ac: int = _effective_ac(target_idx)
+	var attacker_name: String = TURN_QUEUE[attacker_idx]["name"]
 
 	# ── ROLAGEM DE ATAQUE ────────────────────────────────────────────────────
 	var _eroll: Dictionary = DiceRoller.roll_d20_adv_dis(_emods["adv"], _emods["dis"])
@@ -1409,8 +1869,7 @@ func apply_enemy_attack() -> Dictionary:
 		_log("%s rolou %d+%d+%d=%d vs AC %d — ERROU" % [attacker_name, d20, proficiency, attr_mod, attack_total, target_ac], "miss")
 		return {"target": combatant_positions[target_idx], "is_ranged": attack_range > 1, "color": _get_enemy_projectile_color()}
 
-	# Auto-crit (BG3/D&D): ataque melee que acerta um alvo Paralisado é sempre crítico.
-	if attack_range <= 1 and combatant_statuses[target_idx].get("paralyzed", 0) > 0:
+	if _auto_crit(attacker_idx, target_idx, attack_range):
 		is_crit = true
 
 	# ── DANO ─────────────────────────────────────────────────────────────────
@@ -1426,20 +1885,13 @@ func apply_enemy_attack() -> Dictionary:
 		var def_bonus: int = PLAYERS[pidx].get("bonus_def", 0)
 		if def_bonus > 0:
 			damage = maxi(1, damage - def_bonus)
-	# Resistência/Vulnerabilidade/Imunidade + Wet do alvo (último passo).
-	damage = _apply_damage_type_mods(target_idx, ActionData.DamageType.PHYSICAL, damage)
+	# Mitigação por tipo, HP, concentração e Downed/morte: ponto único.
+	var e_dtype: int = _enemy_attack_type(b, attacker_idx)
+	damage = _commit_or_hold(target_idx, damage, e_dtype, is_crit, {}, "enemy_damage_dealt")
 	battle_stats["enemy_damage_dealt"] = battle_stats.get("enemy_damage_dealt", 0) + damage
-	if pidx >= 0:
-		PLAYERS[pidx]["hp"] = maxi(0, PLAYERS[pidx]["hp"] - damage)
-		_check_concentration_after_damage(target_idx, damage)
-		if PLAYERS[pidx]["hp"] <= 0:
-			if is_downed(target_idx):
-				_add_death_save_failure(target_idx, 2 if is_crit else 1)
-			else:
-				_on_death(target_idx)
 	last_attack_info = {"amount": damage, "is_heal": false, "target_idx": target_idx,
 		"is_crit": is_crit, "hit": true, "attack_roll": d20, "attack_total": attack_total, "target_ac": target_ac,
-		"roll_mode": e_roll_mode, "other_roll": e_other_roll,
+		"roll_mode": e_roll_mode, "other_roll": e_other_roll, "damage_type": e_dtype,
 		"is_saving_throw": false, "save_dc": 0, "save_roll": 0, "save_total": 0}
 	if is_crit:
 		context_message = "CRÍTICO! %s acertou %s por %d de dano!" % [attacker_name, target_name, damage]
@@ -1462,7 +1914,7 @@ func apply_enemy_attack() -> Dictionary:
 # que exige saving throw. Mantido separado para que as duas fontes não se confundam.
 func _maybe_apply_stun(target_idx: int, chance: float, source_name: String) -> void:
 	if randf() < chance:
-		combatant_statuses[target_idx]["stun"] = 1
+		apply_condition(target_idx, "stun", 1)   # incapacitado: quebra concentração
 		var tname: String = TURN_QUEUE[target_idx]["name"]
 		context_message += " " + tname + " is stunned!"
 		_log("%s foi atordoado por %s!" % [tname, source_name], "status")
@@ -1484,6 +1936,10 @@ func consume_reaction(combatant_idx: int) -> void:
 func has_reaction_available(combatant_idx: int) -> bool:
 	if dead_indices.has(combatant_idx):
 		return false
+	# Incapacitado (Downed, Atordoado, Paralisado) não pode reagir (BG3).
+	var st: Dictionary = combatant_statuses[combatant_idx]
+	if st.get("downed", false) or st.get("stun", 0) > 0 or st.get("paralyzed", 0) > 0:
+		return false
 	return not combatant_statuses[combatant_idx].get("reaction_used", false)
 
 func set_reaction_setting(combatant_idx: int, key: String, value: bool) -> void:
@@ -1494,90 +1950,99 @@ func set_reaction_setting(combatant_idx: int, key: String, value: bool) -> void:
 func get_reaction_setting(combatant_idx: int, key: String, default_val: bool) -> bool:
 	return combatant_statuses[combatant_idx].get("reaction_settings", {}).get(key, default_val)
 
-# Desengajar (ação principal): impede OA dos inimigos que JÁ estão adjacentes neste
-# momento (regra BG3). Inimigos dos quais o combatente se aproximar DEPOIS ainda
-# podem fazer OA. Guarda o snapshot dos adjacentes atuais em disengage_exempt.
+# Desengajar (ação principal): o combatente não provoca Ataque de Oportunidade de NENHUM
+# inimigo pelo resto do turno (BG3 "Can move without provoking Opportunity Attacks" e D&D
+# 2024 concordam; decisão do projeto: vale para o turno inteiro, contra qualquer inimigo).
 func apply_disengage(combatant_idx: int, consume_action: bool = true) -> void:
 	combatant_statuses[combatant_idx]["disengage"] = true
-	var my_pos: Vector2i = combatant_positions[combatant_idx]
-	var mover_is_player: bool = TURN_QUEUE[combatant_idx]["is_player"]
-	var exempt: Array[int] = []
-	for i in range(TURN_QUEUE.size()):
-		if i == combatant_idx or dead_indices.has(i):
-			continue
-		if TURN_QUEUE[i]["is_player"] == mover_is_player:
-			continue
-		var d: int = absi(my_pos.x - combatant_positions[i].x) + absi(my_pos.y - combatant_positions[i].y)
-		if d <= 1:
-			exempt.append(i)
-	combatant_statuses[combatant_idx]["disengage_exempt"] = exempt
 	# O Pulo reaproveita a evasão de OA SEM gastar a Ação principal (consume_action=false).
 	if consume_action:
 		has_attacked = true
 		_log("%s se desengajou" % TURN_QUEUE[combatant_idx]["name"], "status")
 
+# Empunha arma à distância (arco)? Não faz Ataque de Oportunidade.
+func _wields_ranged_weapon(idx: int) -> bool:
+	var pidx: int = player_index_of(idx)
+	if pidx >= 0:
+		var w: WeaponData = PLAYERS[pidx].get("weapon", null)
+		return w != null and w.is_ranged
+	var ed := ALL_ENEMIES.get(TURN_QUEUE[idx].get("type", ""), null) as EnemyData
+	return ed != null and ed.ranged_weapon
+
+# OA por PASSO: quem sai do alcance corpo a corpo (as 8 casas ao redor) de um hostil em
+# QUALQUER passo do caminho provoca; cada reator aparece uma vez. `path` = casas percorridas,
+# sem a origem `start`.
+func check_opportunity_attacks_along(mover_idx: int, start: Vector2i, path: Array[Vector2i]) -> Array[int]:
+	var result: Array[int] = []
+	var prev: Vector2i = start
+	for step in path:
+		for r in check_opportunity_attacks(mover_idx, prev, step):
+			if not result.has(r):
+				result.append(r)
+		prev = step
+	return result
+
 # Retorna índices de combatentes que PODEM fazer OA contra mover_idx ao sair do
-# alcance corpo-a-corpo. old_pos/new_pos = posição antes/depois do movimento.
+# alcance corpo-a-corpo (Chebyshev: a diagonal conta). old_pos/new_pos = posição antes/depois
+# de UM passo; para um trajeto inteiro use check_opportunity_attacks_along.
 func check_opportunity_attacks(mover_idx: int, old_pos: Vector2i, new_pos: Vector2i) -> Array[int]:
 	var result: Array[int] = []
-	var exempt: Array = combatant_statuses[mover_idx].get("disengage_exempt", [])
+	if combatant_statuses[mover_idx].get("disengage", false):
+		return result   # Desengajar: nenhum OA no turno
 	var mover_is_player: bool = TURN_QUEUE[mover_idx]["is_player"]
 	for i in range(TURN_QUEUE.size()):
 		if i == mover_idx or dead_indices.has(i):
 			continue
 		if TURN_QUEUE[i]["is_player"] == mover_is_player:
 			continue  # mesmo lado
-		if exempt.has(i):
-			continue  # já estava adjacente quando o mover usou Disengage
 		if not has_reaction_available(i):
 			continue
 		if not get_reaction_setting(i, "OA_enabled", true):
 			continue
-		# Condições que impedem fazer Ataque de Oportunidade (BG3/D&D).
+		# Quem não faz Ataque de Oportunidade (bg3.wiki/wiki/Opportunity_Attack): empunhando arma à
+		# distância; com condição que impede reações (Prone, Incapacitado, Sleeping); sem enxergar o
+		# alvo (alvo Invisível ou atacante Cego). Restrained e Charmed (abaixo) são regras herdadas.
 		var rst: Dictionary = combatant_statuses[i]
-		if rst.get("blinded", 0) > 0 or rst.get("paralyzed", 0) > 0 or rst.get("restrained", 0) > 0:
+		if rst.get("blinded", 0) > 0 or rst.get("paralyzed", 0) > 0 or rst.get("restrained", 0) > 0 \
+				or rst.get("prone", 0) > 0:
+			continue
+		if combatant_statuses[mover_idx].get("invisible", 0) > 0 or _wields_ranged_weapon(i):
 			continue
 		# Charmed não pode reagir contra quem o encantou.
 		if rst.get("charmed", 0) > 0 and rst.get("charmed_by", -1) == mover_idx:
 			continue
 		var rpos: Vector2i = combatant_positions[i]
-		var old_dist: int = absi(old_pos.x - rpos.x) + absi(old_pos.y - rpos.y)
-		var new_dist: int = absi(new_pos.x - rpos.x) + absi(new_pos.y - rpos.y)
-		if old_dist <= 1 and new_dist > 1:
+		if king_dist(old_pos, rpos) <= 1 and king_dist(new_pos, rpos) > 1:
 			result.append(i)
 	return result
 
 # Executa um ataque corpo-a-corpo GRATUITO de attacker_idx contra target_idx.
 # Custa apenas a reação (não a ação principal). Popula last_attack_info.
 func apply_opportunity_attack(attacker_idx: int, target_idx: int) -> void:
+	if not TURN_QUEUE[attacker_idx]["is_player"]:
+		# Inimigo: ataque corpo a corpo comum com os PRÓPRIOS stats e tipo de dano.
+		_resolve_enemy_attack(attacker_idx, target_idx, 1, {"range": 1, "damage_mult": 1.0})
+		consume_reaction(attacker_idx)
+		_log("%s fez Ataque de Oportunidade contra %s!" % [
+			TURN_QUEUE[attacker_idx]["name"], TURN_QUEUE[target_idx]["name"]], "dmg")
+		return
+	# Herói: ataque com a arma equipada (reaproveita _apply_attack).
 	var atk_action := ActionData.new()
 	atk_action.attack_range = 1
-	if TURN_QUEUE[attacker_idx]["is_player"]:
-		# Puxa dados/atributo da arma equipada do jogador.
-		atk_action.is_weapon_attack = true
-	else:
-		var etype: String = TURN_QUEUE[attacker_idx].get("type", "")
-		var edata := ALL_ENEMIES.get(etype, null) as EnemyData
-		atk_action.is_weapon_attack = false
-		atk_action.damage_dice_count = edata.damage_dice_count if edata != null else 1
-		atk_action.damage_dice_sides = edata.damage_dice_sides if edata != null else 6
-		atk_action.damage_attribute = ActionData.DamageAttribute.NONE
+	atk_action.is_weapon_attack = true
 	# Salva e troca o contexto de ataque para reaproveitar _apply_attack.
 	var prev_action: ActionData = _current_action
 	var prev_active: int        = active_index
 	var prev_range: int         = current_attack_range
-	var prev_aoe: int           = current_aoe_radius
 	var prev_allies: bool       = _attack_targets_allies
 	active_index = attacker_idx
 	_current_action = atk_action
 	current_attack_range = 1
-	current_aoe_radius = 0
 	_attack_targets_allies = false
 	_apply_attack(target_idx)
 	active_index = prev_active
 	_current_action = prev_action
 	current_attack_range = prev_range
-	current_aoe_radius = prev_aoe
 	_attack_targets_allies = prev_allies
 	consume_reaction(attacker_idx)
 	_log("%s fez Ataque de Oportunidade contra %s!" % [
@@ -1592,12 +2057,14 @@ func apply_uncanny_dodge(rogue_idx: int) -> void:
 		return
 	var original: int = last_attack_info.get("amount", 0)
 	var reduced: int  = original / 2
-	var delta: int    = original - reduced
+	if pending_hit.get("target_idx", -1) == rogue_idx:
+		# Janela de reação: reduz o golpe ANTES do dano (BG3).
+		pending_hit["post_mult"] = float(pending_hit["post_mult"]) * 0.5
+		reduced = _pending_final()
+	else:
+		_set_hp(rogue_idx, get_hp(rogue_idx) + original - reduced)   # golpe já aplicado: reembolsa
 	last_attack_info["amount"] = reduced
 	last_attack_info["uncanny_dodge_applied"] = true
-	var pidx: int = _player_index_by_name(TURN_QUEUE[rogue_idx]["name"])
-	if pidx >= 0:
-		PLAYERS[pidx]["hp"] = mini(PLAYERS[pidx]["max_hp"], PLAYERS[pidx]["hp"] + delta)
 	consume_reaction(rogue_idx)
 	_log("%s usou Esquiva Sobrenatural! Dano %d → %d" % [
 		TURN_QUEUE[rogue_idx]["name"], original, reduced], "status")
@@ -1617,10 +2084,14 @@ func apply_deflect_missiles(monk_idx: int) -> int:
 	var reduction: int = DiceRoller.roll(1, 10) + dex_mod + level
 	var original: int  = last_attack_info.get("amount", 0)
 	var final_dmg: int = maxi(0, original - reduction)
-	var delta: int     = original - final_dmg
+	if pending_hit.get("target_idx", -1) == monk_idx:
+		# Janela de reação: reduz o golpe ANTES do dano (BG3).
+		pending_hit["post_flat"] = int(pending_hit["post_flat"]) + reduction
+		final_dmg = _pending_final()
+	else:
+		_set_hp(monk_idx, get_hp(monk_idx) + original - final_dmg)   # golpe já aplicado: reembolsa
 	last_attack_info["amount"] = final_dmg
 	last_attack_info["deflect_applied"] = true
-	PLAYERS[pidx]["hp"] = mini(PLAYERS[pidx]["max_hp"], PLAYERS[pidx]["hp"] + delta)
 	consume_reaction(monk_idx)
 	_log("%s desviou o projétil! -%d (dano final %d)" % [
 		TURN_QUEUE[monk_idx]["name"], reduction, final_dmg], "status")
@@ -1632,31 +2103,27 @@ func apply_divine_smite_reaction(paladin_idx: int, slot_level: int, is_crit: boo
 	var pidx: int = _player_index_by_name(TURN_QUEUE[paladin_idx]["name"])
 	if pidx < 0:
 		return 0
-	# Consome um slot do nível pedido (ou upcast para o primeiro disponível acima),
-	# direto pelo índice do Paladino — não depende de active_index.
-	var slots: Array = PLAYERS[pidx].get("spell_slots", [0, 0, 0, 0, 0, 0])
-	for i in range(slot_level - 1, slots.size()):
-		if slots[i] > 0:
-			slots[i] -= 1
-			break
-	var dice_count: int = (slot_level + 1) * (2 if is_crit else 1)
-	var smite_dmg: int  = DiceRoller.roll(dice_count, 8)
+	# Consome um slot do nível pedido (ou upcast), direto pelo índice do
+	# Paladino. BG3: 2d8 + 1d8 por nível acima do 1º — usa o nível GASTO.
+	var used_level: int = _consume_slot(pidx, slot_level)
+	if used_level <= 0:
+		return 0
+	var dice_count: int = (used_level + 1) * (2 if is_crit else 1)
+	var smite_roll: int = DiceRoller.roll(dice_count, 8)
+	# Dano RADIANT extra. Com o golpe pendente, vira componente do MESMO golpe
+	# (BG3: uma aplicação de dano — uma falha de Death Save, um teste de
+	# concentração); sem janela, é aplicado à parte.
+	var smite_dmg: int = 0
+	var target_idx: int = last_attack_info.get("target_idx", -1)
+	if target_idx >= 0 and pending_hit.get("target_idx", -1) == target_idx:
+		var rad: int = ActionData.DamageType.RADIANT
+		var before: int = _pending_final()
+		pending_hit["extra"][rad] = int(pending_hit["extra"].get(rad, 0)) + smite_roll
+		smite_dmg = _pending_final() - before
+	elif target_idx >= 0:
+		smite_dmg = _deal_damage_to_combatant(target_idx, smite_roll, ActionData.DamageType.RADIANT, is_crit)
 	last_attack_info["amount"] = last_attack_info.get("amount", 0) + smite_dmg
 	last_attack_info["smite_amount"] = last_attack_info.get("smite_amount", 0) + smite_dmg
-	# Aplica o dano radiante extra ao alvo (last_attack_info já foi consumido p/ HP).
-	var target_idx: int = last_attack_info.get("target_idx", -1)
-	if target_idx >= 0:
-		if TURN_QUEUE[target_idx]["is_player"]:
-			var tpidx: int = _player_index_by_name(TURN_QUEUE[target_idx]["name"])
-			if tpidx >= 0:
-				PLAYERS[tpidx]["hp"] = maxi(0, PLAYERS[tpidx]["hp"] - smite_dmg)
-				if PLAYERS[tpidx]["hp"] <= 0:
-					_on_death(target_idx)
-		else:
-			var tname: String = TURN_QUEUE[target_idx]["name"]
-			enemy_hp[tname] = maxi(0, enemy_hp.get(tname, 0) - smite_dmg)
-			if enemy_hp[tname] <= 0:
-				_on_death(target_idx)
 	# BG3: Divine Smite via reação NÃO consome o ponto de Reação — só o spell slot.
 	# Assim o Paladino pode dar Smite e ainda fazer um OA no mesmo round.
 	_log("%s usou Smite Divino via Reação! +%d dano radiante" % [
@@ -1678,8 +2145,7 @@ func apply_stunning_strike(monk_idx: int, target_idx: int) -> bool:
 	var save_result: Dictionary = _resolve_saving_throw(target_idx, dc, fake_action)
 	var stunned: bool = not save_result["saved"]
 	if stunned:
-		combatant_statuses[target_idx]["stun"] = 1
-		_break_concentration(target_idx)  # Stun (incapacitado) quebra concentração (BG3)
+		apply_condition(target_idx, "stun", 1)   # incapacitado: quebra concentração
 	consume_reaction(monk_idx)
 	var mname: String = TURN_QUEUE[monk_idx]["name"]
 	var tname: String = TURN_QUEUE[target_idx]["name"]
@@ -1695,7 +2161,7 @@ func apply_furtivo_status(player_idx: int) -> void:
 	var pname: String = PLAYERS[player_idx]["name"]
 	for i in range(TURN_QUEUE.size()):
 		if TURN_QUEUE[i]["is_player"] and TURN_QUEUE[i]["name"] == pname:
-			combatant_statuses[i]["furtivo"] = 1
+			apply_condition(i, "furtivo", 1)
 			break
 	_log("%s está em posição furtiva" % pname, "status")
 
@@ -1705,7 +2171,7 @@ func apply_fury_status(player_idx: int) -> void:
 	var pname: String = PLAYERS[player_idx]["name"]
 	for i in range(TURN_QUEUE.size()):
 		if TURN_QUEUE[i]["is_player"] and TURN_QUEUE[i]["name"] == pname:
-			combatant_statuses[i]["fury"] = 1
+			apply_condition(i, "fury", 1)
 			fury_extra_attack = true
 			_log("%s entra em Fúria!" % pname, "status")
 			break
@@ -1723,7 +2189,7 @@ func _is_occupied_by_other(pos: Vector2i) -> bool:
 	var t: TerrainTile = tile_data_map[pos.x][pos.y]
 	if t.is_void():
 		return true
-	if t.object == TerrainTile.ObjectType.OBSTACLE:
+	if _fills_square(t):
 		return true
 	var active_is_player: bool = TURN_QUEUE[active_index]["is_player"]
 	for i in range(combatant_positions.size()):
@@ -1789,7 +2255,7 @@ func get_attack_target_preview() -> Dictionary:
 		return {
 			"name": combatant["name"],
 			"subtitle": combatant.get("type", "Inimigo"),
-			"desc": "HP: %d/%d   AC: %d" % [enemy_hp.get(combatant["name"], 0), get_enemy_max_hp(target_idx), combatant.get("ac", 10)],
+			"desc": "HP: %d/%d   AC: %d" % [get_hp(target_idx), get_enemy_max_hp(target_idx), combatant.get("ac", 10)],
 		}
 
 func get_attack_cursor_pos() -> Vector2i:
@@ -1818,27 +2284,143 @@ func _initial_attack_tile() -> Vector2i:
 		return area[0]
 	return combatant_positions[active_index]
 
-# Move o cursor de AoE em tile, restrito aos tiles dentro do alcance (mesma
-# métrica/LOS de get_attack_area_tiles).
-func move_attack_tile_cursor(delta: Vector2i) -> void:
-	if not attack_tile_mode:
-		return
-	var new_pos := attack_tile_cursor + delta
-	new_pos.x = clampi(new_pos.x, 0, grid_cols - 1)
-	new_pos.y = clampi(new_pos.y, 0, grid_rows - 1)
-	if not get_attack_area_tiles().has(new_pos):
-		return
-	attack_tile_cursor = new_pos
+# ── Cursor de quadrado (mover/mirar) ─────────────────────────────────────────
+# Mouse, analógico, D-pad e setas só movem `cursor_tile`; a regra de validade vive
+# aqui e é consultada no hover (feedback) e na confirmação (bloqueio).
 
-# Move o centro do AoE para o tile sob o mouse, se for um tile de alcance válido
-# (get_attack_area_tiles). Mantém o último válido se fora. Retorna true se moveu.
-func set_attack_tile_cursor_clamped(grid_pos: Vector2i) -> bool:
-	if not attack_tile_mode:
+func set_cursor_tile(pos: Vector2i) -> void:
+	cursor_tile = pos
+
+# Um passo em quadrados, independente de elevação, terreno e alcance. Na borda do grid
+# o cursor permanece no último quadrado válido. Fora do grid, parte do combatente ativo.
+func step_cursor(delta: Vector2i) -> void:
+	if not _cursor_in_grid():
+		cursor_tile = combatant_positions[active_index]
+	var extra: int = 1 if _corner_cursor_active() else 0   # cruzamentos vão de 0 a cols (inclusive)
+	cursor_tile = Vector2i(
+		clampi(cursor_tile.x + delta.x, 0, grid_cols - 1 + extra),
+		clampi(cursor_tile.y + delta.y, 0, grid_rows - 1 + extra))
+
+# O cursor anda pelos cruzamentos de casas (esfera/cilindro em ATTACK_MODE)?
+func _corner_cursor_active() -> bool:
+	return current_state == State.ATTACK_MODE and attack_corner_mode
+
+func _cursor_in_grid() -> bool:
+	var extra: int = 1 if _corner_cursor_active() else 0
+	return cursor_tile.x >= 0 and cursor_tile.x < grid_cols + extra \
+		and cursor_tile.y >= 0 and cursor_tile.y < grid_rows + extra
+
+# As (até) 4 casas que tocam o cruzamento `corner` (vértice superior-esquerdo da casa (x, y)).
+func _corner_tiles(corner: Vector2i) -> Array[Vector2i]:
+	var tiles: Array[Vector2i] = []
+	for dx in [-1, 0]:
+		for dy in [-1, 0]:
+			var t := corner + Vector2i(dx, dy)
+			if _in_grid(t):
+				tiles.append(t)
+	return tiles
+
+# Um cruzamento é mirável se alguma das casas que o tocam está no alcance e (à distância) à vista.
+func _corner_in_range(corner: Vector2i) -> bool:
+	var area: Array[Vector2i] = get_attack_area_tiles()
+	for t in _corner_tiles(corner):
+		if area.has(t):
+			return true
+	return false
+
+# {valid, reason}: o que o hover mostra e o que a confirmação exige. `reason` vazio
+# = nada a dizer (válido, ou fora do grid). As regras de validade são as de sempre
+# (alcance, linha de visão, alvos permitidos); só a forma de navegar mudou.
+func get_cursor_feedback() -> Dictionary:
+	var none := {"valid": false, "reason": ""}
+	if not _cursor_in_grid():
+		return none
+	match current_state:
+		State.MOVE_MODE:
+			if get_reachable_tiles().has(cursor_tile):
+				return {"valid": true, "reason": ""}
+			return {"valid": false, "reason": "Impossível movimentar até aqui"}
+		State.ATTACK_MODE:
+			return _attack_cursor_feedback()
+	return none
+
+func _attack_cursor_feedback() -> Dictionary:
+	var ok := {"valid": true, "reason": ""}
+	var origin: Vector2i = combatant_positions[active_index]
+	if get_current_action() is AcaoPular:
+		if is_valid_jump_landing(active_index, cursor_tile):
+			return ok
+		return {"valid": false, "reason": "Pulo impossível"}
+	if attack_corner_mode:
+		if _corner_in_range(cursor_tile):
+			return ok
+		var near_enough := false
+		for t in _corner_tiles(cursor_tile):
+			if king_dist(t, origin) <= current_attack_range:
+				near_enough = true
+		return {"valid": false, "reason": "Sem linha de visão" if near_enough else "Fora de alcance"}
+	if attack_tile_mode:
+		if get_attack_area_tiles().has(cursor_tile):
+			return ok
+		return {"valid": false, "reason": _unreachable_reason(cursor_tile, origin)}
+	var cidx: int = _combatant_at(cursor_tile)
+	if cidx < 0:
+		return {"valid": false, "reason": "Sem alvo"}
+	if attack_target_indices.has(cidx):
+		return ok
+	return {"valid": false, "reason": _unreachable_reason(cursor_tile, origin)}
+
+func _unreachable_reason(pos: Vector2i, origin: Vector2i) -> String:
+	if king_dist(pos, origin) > current_attack_range:
+		return "Fora de alcance"
+	if current_attack_range > 1 and not _has_los(origin, pos):
+		return "Sem linha de visão"
+	return "Alvo inválido"
+
+# Fixa a seleção a partir do cursor (move_cursor / attack_tile_cursor / attack_cursor_idx)
+# se ele estiver num quadrado válido. Inválido: não altera nada e devolve false, para
+# o chamador mostrar o feedback sem gastar recurso.
+func apply_cursor_selection() -> bool:
+	if not get_cursor_feedback()["valid"]:
 		return false
-	if not get_attack_area_tiles().has(grid_pos):
-		return false
-	attack_tile_cursor = grid_pos
+	match current_state:
+		State.MOVE_MODE:
+			move_cursor = cursor_tile
+		State.ATTACK_MODE:
+			if attack_tile_mode:
+				attack_tile_cursor = cursor_tile
+			else:
+				attack_cursor_idx = attack_target_indices.find(_combatant_at(cursor_tile))
 	return true
+
+# ── Exame de combatentes (ordem da barra de turnos) ──────────────────────────
+func living_turn_order() -> Array[int]:
+	var order: Array[int] = []
+	for i in range(TURN_QUEUE.size()):
+		if not dead_indices.has(i):
+			order.append(i)
+	return order
+
+# Próximo/anterior vivo na ordem de turnos, com volta. Índice morto ou inexistente cai
+# no primeiro vivo; -1 se não resta ninguém. delta 0 só saneia a seleção.
+func examine_step(current_idx: int, delta: int) -> int:
+	var order: Array[int] = living_turn_order()
+	if order.is_empty():
+		return -1
+	var pos: int = order.find(current_idx)
+	if pos < 0:
+		return order[0]
+	return order[posmod(pos + delta, order.size())]
+
+# ── Vibração: qual evento do último golpe merece vibrar (&"" = nenhum) ────────
+func hit_rumble_kind(info: Dictionary) -> StringName:
+	if info.is_empty() or info.get("is_heal", false) \
+			or not info.get("hit", false) or not info.get("is_crit", false):
+		return &""
+	var t: int = info.get("target_idx", -1)
+	if t < 0 or t >= TURN_QUEUE.size():
+		return &""
+	return InputRumble.CRIT_TAKEN if TURN_QUEUE[t]["is_player"] else InputRumble.CRIT_DEALT
 
 func get_attack_target_positions() -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
@@ -1860,8 +2442,8 @@ func get_attack_area_tiles() -> Array[Vector2i]:
 					result.append(Vector2i(col, row))
 	return result
 
-func enter_attack_mode(action_range: int, targets_allies: bool = false, proj_color: Color = Color.WHITE, self_target: bool = false, aoe_radius: int = 0, is_bonus: bool = false) -> void:
-	if current_state != State.PLAYER_TURN:
+func enter_attack_mode(action_range: int, targets_allies: bool = false, proj_color: Color = Color.WHITE, self_target: bool = false, is_bonus: bool = false) -> void:
+	if current_state != State.PLAYER_TURN or active_ended():
 		return
 	if has_attacked and not is_bonus and not fury_extra_attack:
 		return
@@ -1870,10 +2452,10 @@ func enter_attack_mode(action_range: int, targets_allies: bool = false, proj_col
 	_current_attack_is_bonus = is_bonus
 	_attack_targets_allies = targets_allies
 	_attack_self_target = self_target
-	current_aoe_radius = aoe_radius
 	var effective_range: int = action_range
 	if action_range > 1 and _is_elevated(active_index):
 		effective_range += 1
+	effective_range = _blind_capped_range(active_index, effective_range)
 	var origin: Vector2i = combatant_positions[active_index]
 	attack_target_indices.clear()
 	if self_target:
@@ -1895,30 +2477,26 @@ func enter_attack_mode(action_range: int, targets_allies: bool = false, proj_col
 	attack_cursor_idx = 0
 	current_attack_range = effective_range
 	current_attack_color = proj_color
-	# Mira de AoE em PONTO do chão (BG3): só para spells de dano em área (não cura
-	# em aliados, não self-target). O cursor passa a ser um tile livre no alcance.
-	attack_tile_mode = (aoe_radius > 0 or _current_action is AcaoPular) and not self_target and not targets_allies
+	# Mira de área em PONTO do chão (BG3): para áreas que se miram no chão (esfera, cilindro, cubo; não
+	# cura em aliado, não self-target) e para o Pulo. O cursor vira um tile livre no alcance; para esfera
+	# e cilindro ele anda pelos CRUZAMENTOS de casas (D&D 2024).
+	var ground_area: bool = _current_action != null and _current_action.has_area() and _current_action.aims_at_ground()
+	attack_tile_mode = (ground_area or _current_action is AcaoPular) and not self_target and not targets_allies
+	attack_corner_mode = attack_tile_mode and ground_area and _current_action.aims_at_corner()
 	if attack_tile_mode:
 		attack_tile_cursor = _initial_attack_tile()
+		cursor_tile = attack_tile_cursor
+	elif not attack_target_indices.is_empty():
+		cursor_tile = combatant_positions[attack_target_indices[0]]
+	else:
+		cursor_tile = origin
 	current_state = State.ATTACK_MODE
-
-func cycle_attack_target(delta: int) -> void:
-	if attack_target_indices.is_empty():
-		return
-	attack_cursor_idx = (attack_cursor_idx + delta + attack_target_indices.size()) % attack_target_indices.size()
 
 func confirm_attack() -> void:
 	if attack_tile_mode:
-		# Se houver criatura viva no tile mirado E ela for um alvo válido, trata-a
-		# como centro (fluxo de alvo único, com rolagem normal de save por _apply_attack).
-		# Caso contrário (tile vazio ou criatura fora da lista de alvos), detona no ponto.
-		var on_tile: int = _combatant_at(attack_tile_cursor)
-		var list_idx: int = attack_target_indices.find(on_tile) if on_tile >= 0 else -1
-		if list_idx >= 0:
-			attack_cursor_idx = list_idx
-			apply_attack_at_cursor()
-		else:
-			apply_aoe_at_tile(attack_tile_cursor)
+		# Área mirada no chão: TODA criatura na pegada recebe o mesmo tratamento (cada uma com o seu
+		# save); não há mais alvo primário com respingo — prévia = resultado.
+		apply_area_at(attack_tile_cursor)
 		finalize_attack()
 		return
 	if attack_target_indices.is_empty():
@@ -1941,8 +2519,9 @@ func apply_attack_at_cursor() -> int:
 ## resolverem. Mantém o contexto de ataque vivo até ser chamado, para que
 ## hits subsequentes (Flurry) ainda enxerguem range/aoe corretos.
 func finalize_attack() -> void:
-	# Atacar quebra o estado Oculto (BG3).
-	combatant_statuses[active_index].erase("hidden")
+	# Atacar quebra o estado Oculto (BG3) e a Invisibilidade (atacar ou conjurar a encerra).
+	remove_condition(active_index, "hidden")
+	remove_condition(active_index, "invisible")
 	if _current_attack_is_bonus:
 		# Ação bônus (Flurry, Atq. Rápido) consome SÓ a ação bônus — nunca a
 		# ação principal. Manter has_attacked intacto preserva o ataque normal.
@@ -1956,14 +2535,14 @@ func finalize_attack() -> void:
 	current_state = State.PLAYER_TURN
 	attack_target_indices.clear()
 	current_attack_range = 0
-	current_aoe_radius = 0
+	attack_corner_mode = false
 	attack_tile_mode = false
 
 func cancel_attack() -> void:
 	current_state = State.PLAYER_TURN
 	attack_target_indices.clear()
 	current_attack_range = 0
-	current_aoe_radius = 0
+	attack_corner_mode = false
 	attack_tile_mode = false
 
 func _player_index_by_name(pname: String) -> int:
@@ -1977,13 +2556,7 @@ func cancel_confirmed_attack() -> bool:
 		return false
 	var target_idx: int = _undo_attack_info["target_idx"]
 	var hp_before: int  = _undo_attack_info["hp_before"]
-	var target_name: String = TURN_QUEUE[target_idx]["name"]
-	if TURN_QUEUE[target_idx]["is_player"]:
-		var pidx: int = _player_index_by_name(target_name)
-		if pidx >= 0:
-			PLAYERS[pidx]["hp"] = hp_before
-	else:
-		enemy_hp[target_name] = hp_before
+	_set_hp(target_idx, hp_before)
 	if hp_before > 0 and dead_indices.has(target_idx):
 		dead_indices.erase(target_idx)
 		battle_result = ""
@@ -1992,52 +2565,76 @@ func cancel_confirmed_attack() -> bool:
 	context_message = "Ataque cancelado."
 	return true
 
+## Usa (bebe) um item consumível no combatente ativo. Poção: Ação Bônus, 2d4+2 PV, apaga Em Chamas.
 func use_item(item: Dictionary) -> void:
 	if item.get("count", 0) <= 0:
 		return
+	if item.get("bonus_action", false):
+		if has_used_bonus_action:
+			return
+		has_used_bonus_action = true
 	item["count"] -= 1
 	var pidx: int = get_active_player_index()
 	if pidx < 0:
 		return
 	var pname: String = PLAYERS[pidx]["name"]
 	last_attack_info.clear()
-	if item.has("heal"):
-		var before: int = PLAYERS[pidx]["hp"]
-		PLAYERS[pidx]["hp"] = mini(PLAYERS[pidx]["max_hp"], before + item["heal"])
-		var actual: int = PLAYERS[pidx]["hp"] - before
+	if item.has("heal_dice"):
+		var before: int = get_hp(active_index)
+		var rolled: int = DiceRoller.roll(int(item["heal_dice"]), int(item["heal_sides"])) + int(item["heal_flat"])
+		_heal_creature(active_index, rolled)
+		var actual: int = get_hp(active_index) - before
 		last_attack_info = {"amount": actual, "is_heal": true, "target_idx": active_index}
 		context_message = "%s usou %s! +%d HP" % [pname, item["label"], actual]
 		_log("%s usou %s (+%d HP)" % [pname, item["label"], actual], "heal")
-	elif item.has("spell_slot_restore"):
-		var lvl: int = item["spell_slot_restore"] - 1  # índice 0-based
-		var slots: Array = PLAYERS[pidx].get("spell_slots", [0, 0, 0, 0, 0, 0])
-		var slots_max: Array = PLAYERS[pidx].get("spell_slots_max", [0, 0, 0, 0, 0, 0])
-		if lvl >= 0 and lvl < slots.size() and slots[lvl] < slots_max[lvl]:
-			slots[lvl] += 1
-			last_attack_info = {"amount": 1, "is_heal": true, "target_idx": active_index}
-			context_message = "%s usou %s! +1 slot de %dº nível" % [pname, item["label"], lvl + 1]
-			_log("%s usou %s (+1 slot nv.%d)" % [pname, item["label"], lvl + 1], "heal")
-		else:
-			context_message = "%s usou %s! (slots já cheios)" % [pname, item["label"]]
-			_log("%s usou %s (sem efeito)" % [pname, item["label"]], "system")
+
+# Cura `amount` PV (sem passar do máximo), tira o Downed (qualquer cura o remove) e apaga Em Chamas
+# (a Poção de Cura faz as duas coisas). Devolve o PV efetivamente recuperado.
+func _heal_creature(idx: int, amount: int) -> int:
+	var before: int = get_hp(idx)
+	_set_hp(idx, before + amount)
+	if get_hp(idx) > 0 and is_downed(idx):
+		_remove_downed(idx)
+	remove_condition(idx, "burning")
+	return get_hp(idx) - before
+
+func _potion_item() -> Dictionary:
+	for it in TAB_ITEMS:
+		if it.get("label", "") == "Poção":
+			return it
+	return {}
+
+# Número de Poções que restam (estoque compartilhado por beber e arremessar).
+func potion_count() -> int:
+	return int(_potion_item().get("count", 0))
+
+# Arremessar Poção (BG3: Ação, alcance 18 m): a nuvem cura 2d4+2 (uma rolagem) quem estiver na
+# área — aliado ou inimigo — e apaga Em Chamas. É assim que se cura um aliado com a Poção.
+func resolve_potion_throw(center: Vector2i) -> void:
+	var potion: Dictionary = _potion_item()
+	if int(potion.get("count", 0)) <= 0 or _current_action == null:
+		return
+	potion["count"] -= 1
+	last_attack_info.clear()
+	var tiles: Array[Vector2i] = area_footprint(_current_action, center, active_index)
+	last_area_tiles = tiles
+	last_area_center = area_center(_current_action, center, active_index)
+	var amount: int = DiceRoller.roll(POTION_DICE, POTION_SIDES) + POTION_FLAT
+	for i in range(TURN_QUEUE.size()):
+		if dead_indices.has(i) or not tiles.has(combatant_positions[i]):
+			continue
+		var healed: int = _heal_creature(i, amount)
+		_register_heal_floater(i, healed)
+		_log("A Poção arremessada curou %s em %d HP" % [TURN_QUEUE[i]["name"], healed], "heal")
+	_log("%s arremessou uma Poção em %s" % [TURN_QUEUE[active_index]["name"], str(center)], "status")
 
 func _get_attr_modifier(attr: ActionData.DamageAttribute) -> int:
 	var pidx := get_active_player_index()
-	if pidx < 0:
-		return 0
-	var p: Dictionary = PLAYERS[pidx]
-	var val: int
-	match attr:
-		ActionData.DamageAttribute.STR: val = p.get("strength",     10)
-		ActionData.DamageAttribute.DEX: val = p.get("dexterity",    10)
-		ActionData.DamageAttribute.INT: val = p.get("intelligence", 10)
-		ActionData.DamageAttribute.WIS: val = p.get("wisdom",       10)
-		_: return 0
-	return int((val - 10) / 2.0)
+	return _stat_mod(PLAYERS[pidx], attr) if pidx >= 0 else 0
 
 # Modificador D&D bruto a partir de um valor de atributo (val - 10) / 2.
 func _raw_mod(val: int) -> int:
-	return int((val - 10) / 2.0)
+	return floori((val - 10) / 2.0)   # BG3/5e: arredonda para baixo (9 → -1)
 
 # Converte um DamageAttribute em chave de save proficiency ("STR"/"DEX"/...).
 # CON/CHA não existem como DamageAttribute, então saves só são rolados contra
@@ -2129,10 +2726,6 @@ func _athletics_mod(idx: int) -> int:
 func _acrobatics_mod(idx: int) -> int:
 	return _ability_mod(idx, ActionData.DamageAttribute.DEX)
 
-# Percepção passiva (DC base do Hide) = mod de WIS (o "10 +" entra em resolve_hide).
-func _perception_passive(idx: int) -> int:
-	return _ability_mod(idx, ActionData.DamageAttribute.WIS)
-
 # True se algum combatante VIVO ocupa `pos` (exceto `ignore_idx`).
 func _tile_occupied_by_other(pos: Vector2i, ignore_idx: int) -> bool:
 	for i in range(TURN_QUEUE.size()):
@@ -2144,8 +2737,12 @@ func _tile_occupied_by_other(pos: Vector2i, ignore_idx: int) -> bool:
 
 # Wrapper público sobre _get_attack_roll_mods — usado pela UI (hit preview)
 # para colorir/rotular Vantagem/Desvantagem. Assinatura interna inalterada.
-func get_attack_roll_mods(attacker_idx: int, target_idx: int, attack_range: int) -> Dictionary:
-	return _get_attack_roll_mods(attacker_idx, target_idx, attack_range)
+# Mods de Vantagem/Desvantagem do combatente ATIVO contra target_idx (preview).
+# O chamador não escolhe índice: evita confundir índice de PLAYERS com TURN_QUEUE.
+func get_active_attack_roll_mods(target_idx: int) -> Dictionary:
+	if not is_player_turn():
+		return {"adv": 0, "dis": 0, "flat": 0, "bonus_dice": 0}
+	return _get_attack_roll_mods(active_index, target_idx, current_attack_range)
 
 # Conta fontes de vantagem/desvantagem para um roll de ataque.
 # attack_range: range efetivo do ataque (>1 = ranged).
@@ -2183,28 +2780,24 @@ func _get_attack_roll_mods(attacker_idx: int, target_idx: int, attack_range: int
 	# Ataques CONTRA alvo Invisível têm Desvantagem.
 	if tgt_status.get("invisible", 0) > 0:
 		dis += 1
-	# Prone (BG3/D&D): alvo caído → ataque melee tem Vantagem, ranged tem Desvantagem.
-	if tgt_status.get("prone", 0) > 0:
-		if attack_range <= 1:
-			adv += 1
-		else:
-			dis += 1
+	# Prone (BG3): ataques a até 3 m do alvo caído têm Vantagem (corpo a corpo, ou a <= 2
+	# tiles). A BG3 não dá Desvantagem a ataques à distância (isso é regra da 5e).
+	if tgt_status.get("prone", 0) > 0 and (attack_range <= 1 \
+			or king_dist(combatant_positions[attacker_idx], combatant_positions[target_idx]) <= 2):
+		adv += 1
 
-	# Alto terreno (BG3): bônus/penalidade FLAT na rolagem, não advantage.
-	# Atacante mais alto que o alvo: +2; atacando de baixo: -2; mesma altura: 0.
+	# Alto terreno (BG3, bg3.wiki/wiki/High_ground: "apply to all attack rolls, even melee ones"):
+	# bônus/penalidade FLAT na rolagem, não advantage. Atacante mais alto que o alvo: +2;
+	# atacando de baixo: -2; mesma altura: 0. Vale para corpo a corpo e à distância.
 	var flat := 0
-	if attack_range > 1:
-		var atk_high: bool = _is_elevated(attacker_idx)
-		var tgt_high: bool = _is_elevated(target_idx)
-		if atk_high and not tgt_high:
-			flat += 2
-		elif tgt_high and not atk_high:
-			flat -= 2
+	var atk_high: bool = _is_elevated(attacker_idx)
+	var tgt_high: bool = _is_elevated(target_idx)
+	if atk_high and not tgt_high:
+		flat += 2
+	elif tgt_high and not atk_high:
+		flat -= 2
 
-	var tgt_pos: Vector2i = combatant_positions[target_idx]
-	var tgt_tile: TerrainTile = tile_data_map[tgt_pos.x][tgt_pos.y]
-	if tgt_tile.object == TerrainTile.ObjectType.COVER:
-		dis += 1
+	# (BG3 não tem regra de cobertura: o objeto Cobertura só bloqueia movimento e visão.)
 	# Condição Envenenado (superfície de Veneno): desvantagem em ataques.
 	# O DoT puro (chave `poison`) NÃO concede Desvantagem — só dano por turno.
 	if atk_status.get("poisoned", 0) > 0:
@@ -2218,15 +2811,11 @@ func _get_attack_roll_mods(attacker_idx: int, target_idx: int, attack_range: int
 	return {"adv": adv, "dis": dis, "flat": flat, "bonus_dice": bonus_dice}
 
 # Fontes de vantagem/desvantagem para saving throws do combatente saver_idx.
-func _get_save_roll_mods(saver_idx: int) -> Dictionary:
+func _get_save_roll_mods(_saver_idx: int) -> Dictionary:
 	var adv := 0
 	var dis := 0
-	var st: Dictionary = combatant_statuses[saver_idx]
-	if st.get("stun", 0) > 0:
-		dis += 1
-	# Condição Envenenado: desvantagem em saving throws / ability checks.
-	if st.get("poisoned", 0) > 0:
-		dis += 1
+	# Nada aqui por condição: Atordoado falha FOR/DES sozinho (_resolve_saving_throw) e
+	# Envenenado (BG3) só atrapalha ataques e testes de habilidade, não saving throws.
 	return {"adv": adv, "dis": dis}
 
 # Resolve um saving throw. Rola d20 com mods do alvo e compara com dc.
@@ -2235,9 +2824,10 @@ func _resolve_saving_throw(target_idx: int, dc: int, action: ActionData, save_at
 	var st: Dictionary = combatant_statuses[target_idx]
 	var save_attr = action.save_attribute if save_attr_override == -999 else save_attr_override
 	var is_str_dex := save_attr == ActionData.DamageAttribute.STR or save_attr == ActionData.DamageAttribute.DEX
-	# Paralyzed (BG3/D&D): falha automática em saves de FOR e DES.
-	if st.get("paralyzed", 0) > 0 and is_str_dex:
-		_log("%s está paralisado — falha automática no save." % TURN_QUEUE[target_idx]["name"], "status")
+	# Paralisado e Atordoado (BG3): falha automática em saves de FOR e DES.
+	if is_str_dex and (st.get("paralyzed", 0) > 0 or st.get("stun", 0) > 0):
+		var why: String = "paralisado" if st.get("paralyzed", 0) > 0 else "atordoado"
+		_log("%s está %s — falha automática no save." % [TURN_QUEUE[target_idx]["name"], why], "status")
 		return {"saved": false, "roll": 0, "total": 0, "mode": "auto-fail", "dc": dc}
 	var mods: Dictionary = _get_save_roll_mods(target_idx)
 	# Restrained: Desvantagem em saves de DES. Prone: Desvantagem em saves de FOR e DES.
@@ -2264,9 +2854,10 @@ func _resolve_saving_throw(target_idx: int, dc: int, action: ActionData, save_at
 
 # DC padrão de save de conjuração (D&D 5e): 8 + proficiência + mod do atributo.
 func _spell_save_dc(attacker_idx: int, attr: ActionData.DamageAttribute) -> int:
-	var pidx: int = get_active_player_index()
-	var prof: int = PLAYERS[pidx].get("proficiency", 2) if pidx >= 0 else 2
-	return 8 + prof + _get_attr_modifier(attr)
+	var pidx: int = player_index_of(attacker_idx)
+	if pidx < 0:
+		return 8 + 2
+	return 8 + int(PLAYERS[pidx].get("proficiency", 2)) + _stat_mod(PLAYERS[pidx], attr)
 
 # Hook genérico: aplica `action.applies_condition` ao alvo. Se a ação define um
 # atributo de save de condição, o alvo rola um save próprio (DC = condition_dc ou
@@ -2291,14 +2882,8 @@ func _apply_action_condition(target_idx: int, action: ActionData, attacker_idx: 
 			StatusDefinitions.name_of(key), action.condition_duration], "status")
 
 # Salva o HP atual do alvo para permitir desfazer o ataque (_undo_attack_info).
-func _save_undo_hp(target_idx: int, target_name: String) -> void:
-	var hp_before: int
-	if TURN_QUEUE[target_idx]["is_player"]:
-		var pidx: int = _player_index_by_name(target_name)
-		hp_before = PLAYERS[pidx]["hp"] if pidx >= 0 else 0
-	else:
-		hp_before = enemy_hp.get(target_name, 0)
-	_undo_attack_info = {"target_idx": target_idx, "hp_before": hp_before}
+func _save_undo_hp(target_idx: int, _target_name: String) -> void:
+	_undo_attack_info = {"target_idx": target_idx, "hp_before": get_hp(target_idx)}
 
 # Retorna o valor de DEX de um combatente do TURN_QUEUE (player ou inimigo).
 func _combatant_dex(entry: Dictionary) -> int:
@@ -2308,13 +2893,23 @@ func _combatant_dex(entry: Dictionary) -> int:
 	var edata := ALL_ENEMIES.get(entry.get("type", ""), null) as EnemyData
 	return edata.dexterity if edata != null else 10
 
-# Rola iniciativa (d20 + mod DEX) para cada combatente e ordena o TURN_QUEUE
+# Bônus de iniciativa de um combatente (além do mod. de DEX): ponto de entrada para features e
+# efeitos, calibrados para d20 (não copiados do BG3). Nenhum personagem tem valor fixo; hoje só
+# a chave opcional "initiative_bonus" do dicionário do herói (preenchida por feature) conta.
+func _initiative_bonus(entry: Dictionary) -> int:
+	if entry.get("is_player", false):
+		var pidx: int = _player_index_by_name(entry["name"])
+		if pidx >= 0:
+			return int(PLAYERS[pidx].get("initiative_bonus", 0))
+	return 0
+
+# Rola iniciativa (d20 + mod DEX + bônus aplicáveis) para cada combatente e ordena o TURN_QUEUE
 # em ordem decrescente. Empate: maior DEX primeiro. Reseta active_index = 0.
 # NÃO acessa combatant_positions — deve ser chamada ANTES de setup() atribuir
 # posições, para que estas sejam atribuídas já na ordem ordenada.
 func roll_initiative() -> void:
 	for entry in TURN_QUEUE:
-		entry["initiative_roll"] = DiceRoller.roll_d(20) + _raw_mod(_combatant_dex(entry))
+		entry["initiative_roll"] = DiceRoller.roll_d(20) + _raw_mod(_combatant_dex(entry)) + _initiative_bonus(entry)
 	TURN_QUEUE.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		if a["initiative_roll"] != b["initiative_roll"]:
 			return a["initiative_roll"] > b["initiative_roll"]
@@ -2324,22 +2919,17 @@ func roll_initiative() -> void:
 # Inicializa o turno do combatente ativo (TURN_QUEUE[active_index]). Deve ser
 # chamada DEPOIS de setup() porque depende de combatant_positions.
 func begin_turn() -> void:
-	# O 1º combatente já está agindo sem passar por advance_turn — marca-o como
-	# tendo agido neste round para que o decaimento de superfícies (1x/round)
-	# dispare corretamente quando o turno voltar a ele.
-	_acted_this_round[active_index] = true
-	move_cursor = combatant_positions[active_index]
-	has_attacked = false
-	has_used_bonus_action = false
-	fury_extra_attack = false
-	_sneak_attack_used_this_turn = false
-	if is_player_turn():
-		current_state = State.PLAYER_TURN
-		enemy_action_text = ""
-		_load_hero_actions(TURN_QUEUE[active_index]["name"])
-	else:
-		current_state = State.ENEMY_TURN
-		_roll_enemy_action()
+	# O 1º turno também é compartilhado: os heróis consecutivos desde o 1º formam o bloco. Sem efeitos
+	# de início de turno (a batalha acabou de começar); só o estado de turno de cada membro.
+	var first: int = active_index
+	turn_block = block_from(first)
+	_member_turn.clear()
+	_lost_turn.clear()
+	_ended_turn.clear()
+	for m in turn_block:
+		_acted_this_round[m] = true
+		_begin_member(m)
+	_activate_member(first)
 
 func get_damage_range(action: ActionData) -> Vector2i:
 	var pidx := get_active_player_index()
@@ -2368,7 +2958,7 @@ func get_damage_range(action: ActionData) -> Vector2i:
 		ActionData.DamageAttribute.INT: attr_val = p.get("intelligence", 10)
 		ActionData.DamageAttribute.WIS: attr_val = p.get("wisdom",       10)
 		_: attr_val = 10
-	var mod: int = int((attr_val - 10) / 2.0)
+	var mod: int = 0 if action.is_spell else int((attr_val - 10) / 2.0)   # magia não soma o modificador
 	return Vector2i(dice_count + mod, dice_count * dice_sides + mod)
 
 func _apply_attack(target_idx: int) -> void:
@@ -2412,7 +3002,7 @@ func _apply_attack(target_idx: int) -> void:
 				_log("%s não precisa de ajuda." % target_name, "miss")
 			return
 
-		var hp_before: int = PLAYERS[pidx]["hp"] if pidx >= 0 else 0
+		var hp_before: int = get_hp(target_idx)
 		_undo_attack_info = {"target_idx": target_idx, "hp_before": hp_before}
 		var heal_attr: ActionData.DamageAttribute = action.damage_attribute if action else ActionData.DamageAttribute.WIS
 		var heal: int = DiceRoller.roll(
@@ -2420,24 +3010,18 @@ func _apply_attack(target_idx: int) -> void:
 			action.damage_dice_sides if action else 4
 		) + _get_attr_modifier(heal_attr)
 		if pidx >= 0:
-			PLAYERS[pidx]["hp"] = mini(PLAYERS[pidx]["max_hp"], PLAYERS[pidx]["hp"] + heal)
-			if PLAYERS[pidx]["hp"] > 0 and is_downed(target_idx):
+			_set_hp(target_idx, get_hp(target_idx) + heal)
+			if get_hp(target_idx) > 0 and is_downed(target_idx):
 				_remove_downed(target_idx)  # qualquer cura remove o estado Downed
 		last_attack_info = {"amount": heal, "is_heal": true, "target_idx": target_idx,
 			"is_crit": false, "hit": true, "attack_roll": 0, "attack_total": 0, "target_ac": 0}
 		context_message = "%s healed %s for %d HP!" % [attacker, target_name, heal]
 		_log("%s curou %s em %d HP" % [attacker, target_name, heal], "heal")
-		if current_aoe_radius > 0:
+		if current_has_area():
 			_apply_aoe_heal_splash(target_idx, heal)
 		return
 
-	var target_ac: int = TURN_QUEUE[target_idx].get("ac", 10)
-	# Condição Acid (superfície de Ácido): -2 CA.
-	if combatant_statuses[target_idx].get("acid", 0) > 0:
-		target_ac -= 2
-
-	# Cobertura agora vira Desvantagem na rolagem (ver _get_attack_roll_mods),
-	# não mais um flat miss pré-rolagem.
+	var target_ac: int = _effective_ac(target_idx)
 
 	# ── Resolve dados do atacante ────────────────────────────────────────────
 	var pidx_atk: int       = get_active_player_index()
@@ -2452,29 +3036,36 @@ func _apply_attack(target_idx: int) -> void:
 	var dice_count: int = 1
 	var dice_sides: int = 6
 	var weapon_attack_bonus: int = 0
+	# Tipo do componente principal: ataque com arma causa o tipo da arma (BG3).
+	var dtype: int = action.damage_type if action != null else ActionData.DamageType.BLUDGEONING
 	if is_weapon_atk and weapon != null:
 		attr                = weapon.damage_attribute
 		dice_count          = weapon.damage_dice_count
 		dice_sides          = weapon.damage_dice_sides
 		weapon_attack_bonus = weapon.attack_bonus
+		dtype               = weapon.damage_type
 		if action.use_versatile_grip and weapon.versatile_dice_sides > 0:
 			dice_sides = weapon.versatile_dice_sides
-		if weapon.is_finesse and pidx_atk >= 0:
-			var p: Dictionary = PLAYERS[pidx_atk]
-			var str_mod := _raw_mod(p.get("strength",  10))
-			var dex_mod := _raw_mod(p.get("dexterity", 10))
-			attr = ActionData.DamageAttribute.DEX if dex_mod >= str_mod else ActionData.DamageAttribute.STR
 	elif action != null:
 		attr       = action.damage_attribute
 		dice_count = action.damage_dice_count
 		dice_sides = action.damage_dice_sides
+	# Atributo (arma/finesse/ação) e bônus da arma: mesma conta do preview.
+	if pidx_atk >= 0:
+		var pb: Dictionary = _player_attack_bonus(pidx_atk, action)
+		attr = pb["attr"]
+		weapon_attack_bonus = pb["weapon_bonus"]
 
 	var attr_mod: int = _get_attr_modifier(attr)
+	# Magia (truque ou slot) não soma o modificador de atributo ao DANO (bg3.wiki/wiki/Damage: "Ability
+	# score modifiers are not normally added to damage rolls for spells"); ataque com arma soma. A
+	# rolagem de acerto e o DC de save continuam usando o modificador.
+	var dmg_mod: int = 0 if (action != null and action.is_spell) else attr_mod
 
 	var is_saving_throw: bool = action != null and action.requires_saving_throw
 	# Auto-hit: spells de área ou slot sem saving throw (cantrips de área, etc.)
 	var is_auto_hit: bool = not is_saving_throw and action != null and (
-		action.aoe_radius > 0 or
+		action.has_area() or
 		(not action.is_weapon_attack and action.spell_slot_level > 0)
 	)
 
@@ -2483,31 +3074,16 @@ func _apply_attack(target_idx: int) -> void:
 		_save_undo_hp(target_idx, target_name)
 		var dc: int = _spell_save_dc(active_index, attr)
 		var save_result: Dictionary = _resolve_saving_throw(target_idx, dc, action)
-		var base_dmg: int = DiceRoller.roll(dice_count, dice_sides) + attr_mod + bonus_atk
+		var base_dmg: int = DiceRoller.roll(dice_count, dice_sides) + dmg_mod + bonus_atk
 		var st_damage: int = maxi(1, base_dmg / 2 if save_result["saved"] else base_dmg)
-		st_damage = _apply_damage_type_mods(target_idx, action.damage_type if action != null else ActionData.DamageType.PHYSICAL, st_damage)
+		st_damage = _deal_damage_to_combatant(target_idx, st_damage, dtype)
 		battle_stats["player_damage_dealt"] = battle_stats.get("player_damage_dealt", 0) + st_damage
-		if TURN_QUEUE[target_idx]["is_player"]:
-			var pidx_st: int = _player_index_by_name(target_name)
-			if pidx_st >= 0:
-				PLAYERS[pidx_st]["hp"] = maxi(0, PLAYERS[pidx_st]["hp"] - st_damage)
-				_check_concentration_after_damage(target_idx, st_damage)
-				if PLAYERS[pidx_st]["hp"] <= 0:
-					if is_downed(target_idx):
-						_add_death_save_failure(target_idx, 1)
-					else:
-						_on_death(target_idx)
-		else:
-			var new_hp_st: int = maxi(0, enemy_hp.get(target_name, 0) - st_damage)
-			enemy_hp[target_name] = new_hp_st
-			if new_hp_st <= 0:
-				_on_death(target_idx)
 		last_attack_info = {
 			"amount": st_damage, "is_heal": false, "target_idx": target_idx,
 			"is_crit": false, "hit": true,
 			"attack_roll": save_result["roll"], "attack_total": save_result["total"],
 			"target_ac": target_ac, "smite_amount": 0,
-			"damage_type": action.damage_type if action != null else ActionData.DamageType.PHYSICAL,
+			"damage_type": dtype,
 			"roll_mode": save_result["mode"], "other_roll": 0,
 			"is_saving_throw": true, "save_dc": dc,
 			"save_roll": save_result["roll"], "save_total": save_result["total"],
@@ -2519,10 +3095,6 @@ func _apply_attack(target_idx: int) -> void:
 		_log("%s Saving Throw DC %d: %s rola %d+%d=%d — %s (%d dano)" % [
 			attacker, dc, target_name, save_result["roll"], sv_mod,
 			save_result["total"], result_txt, st_damage], "status" if save_result["saved"] else "dmg")
-		if current_aoe_radius > 0:
-			# Cada alvo secundário faz seu próprio save: falha = dano cheio,
-			# passa = metade (mesma DC do alvo principal).
-			_apply_aoe_splash(target_idx, base_dmg, dc, action)
 		_deposit_surface_after_attack(combatant_positions[target_idx], action)
 		_apply_action_condition(target_idx, action, active_index)
 		return
@@ -2563,13 +3135,12 @@ func _apply_attack(target_idx: int) -> void:
 			_log("%s rolou %d+%d+%d=%d vs AC %d — ERROU" % [attacker, d20, prof, attr_mod, attack_total, target_ac], "miss")
 			return
 
-	# Auto-crit (BG3/D&D): ataque melee que acerta um alvo Paralisado é sempre crítico.
-	if current_attack_range <= 1 and combatant_statuses[target_idx].get("paralyzed", 0) > 0:
+	if _auto_crit(active_index, target_idx, current_attack_range):
 		is_crit = true
 
 	# ── DANO — proficiência NUNCA entra no dano ──────────────────────────────
 	var roll_count: int = dice_count * 2 if is_crit else dice_count
-	var damage: int = DiceRoller.roll(roll_count, dice_sides) + attr_mod + bonus_atk
+	var damage: int = DiceRoller.roll(roll_count, dice_sides) + dmg_mod + bonus_atk
 
 	# Bônus de status aplicados APÓS o dano base. Rastreados em separado para
 	# que o display estilo BG3 mostre cada componente como um floater próprio.
@@ -2579,11 +3150,18 @@ func _apply_attack(target_idx: int) -> void:
 	if statuses.get("raging", 0) > 0 and current_attack_range <= 1 and attr == ActionData.DamageAttribute.STR:
 		damage += 2
 	if _can_sneak_attack(active_index, target_idx):
-		var sneak: int = DiceRoller.roll(2, 6)
+		# BG3: 1d6 no nível 1, +1d6 a cada 2 níveis (nível 4 = 2d6, nível 11-12 = 6d6).
+		var sneak_pidx: int = player_index_of(active_index)   # _can_sneak_attack garante >= 0
+		var sneak_dice: int = floori((int(PLAYERS[sneak_pidx].get("level", 1)) + 1) / 2.0)
+		# No crítico TODOS os dados dobram (bg3.wiki/wiki/Sneak_Attack_(Critical_Hit): 4d6 no nível 3,
+		# o dobro dos 2d6 do corpo a corpo).
+		if is_crit:
+			sneak_dice *= 2
+		var sneak: int = DiceRoller.roll(sneak_dice, 6)
 		if statuses.get("furtivo", 0) > 0:
 			statuses.erase("furtivo")
 		_sneak_attack_used_this_turn = true
-		_log("%s usa Ataque Furtivo! +2d6=%d" % [attacker, sneak], "status")
+		_log("%s usa Ataque Furtivo! +%dd6=%d" % [attacker, sneak_dice, sneak], "status")
 		damage += sneak
 		status_bonus += sneak
 		status_bonus_label = "Furtivo"
@@ -2606,41 +3184,39 @@ func _apply_attack(target_idx: int) -> void:
 		_log("%s Smite Divino! +%dd%d=%d radiante" % [attacker, action.smite_dice_count, action.smite_dice_sides, smite_amount], "crit")
 		damage += smite_amount
 	# Arma mergulhada (Dip): +1d4 de Fogo por alguns ataques com arma; gasta carga.
+	var coat: int = 0
 	if is_weapon_atk and statuses.get("coated_fire", 0) > 0:
-		var coat: int = DiceRoller.roll(1, 4)
+		coat = DiceRoller.roll(1, 4)
 		damage += coat
 		status_bonus += coat
 		status_bonus_label = "Fogo" if status_bonus_label == "" else status_bonus_label + "+Fogo"
 		statuses["coated_fire"] -= 1
 		_log("%s arma em chamas! +1d4=%d de Fogo" % [attacker, coat], "status")
-	damage = maxi(1, damage)
-	# Resistência/Vulnerabilidade/Imunidade + Wet do alvo (último passo).
-	damage = _apply_damage_type_mods(target_idx, action.damage_type if action != null else ActionData.DamageType.PHYSICAL, damage)
 
-	# ── APLICA O DANO ────────────────────────────────────────────────────────
+	# ── APLICA O DANO (BG3: cada tipo mitigado separadamente) ─────────────────
+	# Componente principal (dtype) = dado + atributo + Fúria/Furtivo/Marca; extras:
+	# Smite (RADIANT) e Arma em chamas (FIRE).
+	var main_raw: int = maxi(1, damage - smite_amount - coat)
+	var extra: Dictionary = {}
+	if smite_amount > 0:
+		extra[ActionData.DamageType.RADIANT] = smite_amount
+	if coat > 0:
+		extra[ActionData.DamageType.FIRE] = coat
+	# Partes já mitigadas, só para os floaters (base / bônus / Smite somam = dano).
+	var main_bonus_raw: int = status_bonus - coat
+	var base_shown: int = _apply_damage_type_mods(target_idx, dtype, maxi(0, main_raw - main_bonus_raw))
+	var main_shown: int = _apply_damage_type_mods(target_idx, dtype, main_raw)
+	status_bonus = (main_shown - base_shown) + _apply_damage_type_mods(target_idx, ActionData.DamageType.FIRE, coat)
+	smite_amount = _apply_damage_type_mods(target_idx, ActionData.DamageType.RADIANT, smite_amount)
 	_save_undo_hp(target_idx, target_name)
+	damage = _commit_or_hold(target_idx, main_raw, dtype, is_crit, extra, "player_damage_dealt")
 	battle_stats["player_damage_dealt"] = battle_stats.get("player_damage_dealt", 0) + damage
-	if TURN_QUEUE[target_idx]["is_player"]:
-		var pidx: int = _player_index_by_name(target_name)
-		if pidx >= 0:
-			PLAYERS[pidx]["hp"] = maxi(0, PLAYERS[pidx]["hp"] - damage)
-			_check_concentration_after_damage(target_idx, damage)
-			if PLAYERS[pidx]["hp"] <= 0:
-				if is_downed(target_idx):
-					_add_death_save_failure(target_idx, 2 if is_crit else 1)
-				else:
-					_on_death(target_idx)
-	else:
-		var new_hp: int = maxi(0, enemy_hp.get(target_name, 0) - damage)
-		enemy_hp[target_name] = new_hp
-		if new_hp <= 0:
-			_on_death(target_idx)
 
 	last_attack_info = {"amount": damage, "is_heal": false, "target_idx": target_idx,
 		"is_crit": is_crit, "hit": true, "attack_roll": d20, "attack_total": attack_total,
 		"target_ac": target_ac, "smite_amount": smite_amount,
 		"status_bonus_amount": status_bonus, "status_bonus_label": status_bonus_label,
-		"damage_type": action.damage_type if action != null else ActionData.DamageType.PHYSICAL,
+		"damage_type": dtype,
 		"roll_mode": roll_mode, "other_roll": other_roll,
 		"is_saving_throw": false, "save_dc": 0, "save_roll": 0, "save_total": 0}
 	if is_crit:
@@ -2650,34 +3226,20 @@ func _apply_attack(target_idx: int) -> void:
 	else:
 		context_message = "%s hit %s for %d damage!" % [attacker, target_name, damage]
 		_log("%s acertou %s por %d de dano" % [attacker, target_name, damage], "dmg")
-
-	# Respingo de AoE
-	if current_aoe_radius > 0:
-		_apply_aoe_splash(target_idx, int(damage / 2.0), 0, action)
-
 	_deposit_surface_after_attack(combatant_positions[target_idx], action)
 	_apply_action_condition(target_idx, action, active_index)
 
-# Aplica o respingo de AoE aos alvos secundários no raio, centrado no alvo
-# primário (conjurador + primário excluídos). Wrapper fino sobre _aoe_damage_at
-# para preservar a assinatura usada pelos dois ramos de _apply_attack.
-func _apply_aoe_splash(primary_idx: int, splash_damage: int, dc: int = 0, action: ActionData = null) -> void:
-	_aoe_damage_at(combatant_positions[primary_idx], current_aoe_radius, splash_damage, dc,
-		action, [active_index, primary_idx], true)
-
-# Núcleo de dano em ÁREA: atinge todos os combatentes vivos a ≤ radius (Manhattan)
-# de `center`, exceto os índices em `exclude`. Friendly fire (BG3): inimigos E
-# aliados. Quando dc > 0 e action != null, cada alvo faz seu PRÓPRIO saving throw
-# (falha = full_dmg cheio, passa = metade); sem dc, aplica full_dmg flat (legado).
-# Se enqueue_floaters, enfileira cada acerto em pending_surface_hits (usado pela
-# detonação em tile vazio, que não tem alvo primário em last_attack_info).
-func _aoe_damage_at(center: Vector2i, radius: int, full_dmg: int, dc: int, action: ActionData, exclude: Array, enqueue_floaters: bool = false) -> void:
+# Núcleo de dano em ÁREA: atinge todos os combatentes vivos cujo quadrado está na pegada `tiles`,
+# exceto os índices em `exclude`. Friendly fire (BG3): inimigos E aliados. Com dc > 0, cada alvo faz
+# o seu PRÓPRIO saving throw (falha = dano cheio, passa = metade); sem dc o dano é cheio (ex.: Nuvem
+# de Adagas, "not subject to saving throws"). Com enqueue_floaters, cada acerto vira um floater em
+# pending_surface_hits (a área não tem alvo primário em last_attack_info).
+func _area_damage(tiles: Array[Vector2i], full_dmg: int, dc: int, action: ActionData, exclude: Array, enqueue_floaters: bool = false) -> void:
 	var hits: Array[int] = []
 	for i in range(TURN_QUEUE.size()):
 		if exclude.has(i) or dead_indices.has(i):
 			continue
-		var d: int = king_dist(combatant_positions[i], center)
-		if d <= radius:
+		if tiles.has(combatant_positions[i]):
 			hits.append(i)
 	for i in hits:
 		var sname: String = TURN_QUEUE[i]["name"]
@@ -2688,68 +3250,62 @@ func _aoe_damage_at(center: Vector2i, radius: int, full_dmg: int, dc: int, actio
 			var save_result: Dictionary = _resolve_saving_throw(i, dc, action)
 			final_dmg = maxi(1, full_dmg / 2) if save_result["saved"] else full_dmg
 			save_txt = " (resistiu, metade)" if save_result["saved"] else " (falhou)"
-		# Resistência/Vulnerabilidade/Imunidade + Wet do alvo (último passo).
-		final_dmg = _apply_damage_type_mods(i, action.damage_type if action != null else ActionData.DamageType.PHYSICAL, final_dmg)
+		final_dmg = _deal_damage_to_combatant(i, final_dmg, action.damage_type if action != null else ActionData.DamageType.BLUDGEONING)
 		battle_stats["player_damage_dealt"] = battle_stats.get("player_damage_dealt", 0) + final_dmg
 		if enqueue_floaters:
 			var fl_color: Color = ActionData.damage_type_color(action.damage_type) if action != null else Color(0.78, 0.45, 1.0)
 			_register_damage_floater(i, final_dmg, fl_color, "")
-		if TURN_QUEUE[i]["is_player"]:
-			var pidx: int = _player_index_by_name(sname)
-			if pidx >= 0:
-				PLAYERS[pidx]["hp"] = maxi(0, PLAYERS[pidx]["hp"] - final_dmg)
-				_check_concentration_after_damage(i, final_dmg)
-				if PLAYERS[pidx]["hp"] <= 0:
-					_on_death(i)
-		else:
-			var new_hp: int = maxi(0, enemy_hp.get(sname, 0) - final_dmg)
-			enemy_hp[sname] = new_hp
-			if new_hp <= 0:
-				_on_death(i)
 		_log("AoE acertou %s por %d de dano%s" % [sname, final_dmg, save_txt], "dmg")
-		# Hook genérico de condição também atinge alvos secundários no raio.
+		# Hook genérico de condição: atinge todos os alvos da área.
 		_apply_action_condition(i, action, active_index)
 
-## Detona uma spell de AoE num PONTO do chão (sem criatura no centro). Calcula DC
-## e dano-base como o ramo de saving throw de _apply_attack; todos no raio fazem o
-## próprio save. Deposita a superfície (que já faz o _ignite) e enfileira floaters.
-func apply_aoe_at_tile(center: Vector2i) -> void:
+## Aplica a ação de área corrente (esfera, cilindro, cubo, cone, linha) mirada em `aim` — a MESMA
+## pegada da prévia (area_footprint). Todas as criaturas na área (menos o conjurador) recebem o dano
+## com o próprio save; depois a superfície é depositada em toda a pegada (o Fogo já ateia quem está em
+## cima). Concentração começa ao conjurar.
+func apply_area_at(aim: Vector2i) -> void:
 	var action: ActionData = _current_action
-	if action == null:
+	if action == null or not action.has_area():
 		return
+	var tiles: Array[Vector2i] = area_footprint(action, aim, active_index)
+	last_area_tiles = tiles
+	last_area_center = area_center(action, aim, active_index)
+	if action.requires_concentration:
+		_start_concentration(active_index, action)
 	var pidx_atk: int  = get_active_player_index()
-	var prof: int      = PLAYERS[pidx_atk].get("proficiency", 2) if pidx_atk >= 0 else 2
 	var bonus_atk: int = PLAYERS[pidx_atk].get("bonus_atk", 0) if pidx_atk >= 0 else 0
-	var attr: ActionData.DamageAttribute = action.damage_attribute
-	var attr_mod: int  = _get_attr_modifier(attr)
-	var base_dmg: int  = DiceRoller.roll(action.damage_dice_count, action.damage_dice_sides) + attr_mod + bonus_atk
-	var dc: int        = 8 + prof + attr_mod
+	var attr_mod: int  = _get_attr_modifier(action.damage_attribute)
+	# Magia não soma o modificador de atributo ao dano (bg3.wiki/wiki/Damage); o DC do save usa o mod.
+	var dmg_mod: int   = 0 if action.is_spell else attr_mod
+	var base_dmg: int  = 0
+	if action.damage_dice_count > 0:
+		base_dmg = DiceRoller.roll(action.damage_dice_count, action.damage_dice_sides) + dmg_mod + bonus_atk
+	var dc: int        = _spell_save_dc(active_index, action.damage_attribute) if action.requires_saving_throw else 0
 	var attacker: String = TURN_QUEUE[active_index]["name"]
-	# Sem alvo primário: o floater vem de pending_surface_hits, não de last_attack_info.
 	last_attack_info = {}
-	context_message = "%s conjura %s no chão (DC %d)" % [attacker, action.label, dc]
-	_log("%s conjura %s no chão (DC %d)" % [attacker, action.label, dc], "status")
-	_aoe_damage_at(center, current_aoe_radius, base_dmg, dc, action, [active_index], true)
-	_deposit_surface_after_attack(center, action)
+	var dc_txt: String = " (DC %d)" % dc if dc > 0 else ""
+	context_message = "%s conjura %s — %s%s" % [attacker, action.label, action.area_text(), dc_txt]
+	_log("%s conjura %s — %s%s" % [attacker, action.label, action.area_text(), dc_txt], "status")
+	if base_dmg > 0:
+		_area_damage(tiles, base_dmg, dc, action, [active_index], true)
+	_deposit_surface_after_attack(aim, action)
 
-# Splash de cura: cura os aliados (jogadores) no raio, além do alvo primário.
+# Cura em área: cura os aliados (jogadores) na pegada da emanação em volta do alvo primário, além dele.
 # Reusa o mesmo valor de cura rolado para o primário (BG3: rola uma vez).
 func _apply_aoe_heal_splash(primary_idx: int, heal_amount: int) -> void:
-	var primary_pos: Vector2i = combatant_positions[primary_idx]
+	var action: ActionData = _current_action
+	var tiles: Array[Vector2i] = area_footprint(action, combatant_positions[primary_idx], active_index)
 	for i in range(TURN_QUEUE.size()):
 		if i == primary_idx or dead_indices.has(i):
 			continue
 		if not TURN_QUEUE[i]["is_player"]:
 			continue  # cura só aliados (jogadores)
-		var d: int = king_dist(combatant_positions[i], primary_pos)
-		if d > current_aoe_radius:
+		if not tiles.has(combatant_positions[i]):
 			continue
-		var pidx: int = _player_index_by_name(TURN_QUEUE[i]["name"])
-		if pidx >= 0:
-			PLAYERS[pidx]["hp"] = mini(PLAYERS[pidx]["max_hp"], PLAYERS[pidx]["hp"] + heal_amount)
-			if PLAYERS[pidx]["hp"] > 0 and is_downed(i):
-				_remove_downed(i)
-			_log("Cura em área curou %s em %d HP" % [TURN_QUEUE[i]["name"], heal_amount], "heal")
+		_set_hp(i, get_hp(i) + heal_amount)
+		if get_hp(i) > 0 and is_downed(i):
+			_remove_downed(i)
+		_log("Cura em área curou %s em %d HP" % [TURN_QUEUE[i]["name"], heal_amount], "heal")
 
 func get_enemy_max_hp(idx: int) -> int:
 	var enemy_type: String = TURN_QUEUE[idx].get("type", "")
@@ -2776,13 +3332,41 @@ func get_active_status_text(idx: int) -> String:
 func apply_condition(idx: int, key: String, duration: int, source_idx: int = -1) -> void:
 	if idx < 0 or idx >= combatant_statuses.size():
 		return
+	# Wet (BG3): imune a Burning — não pega fogo enquanto molhado.
+	if key == "burning" and combatant_statuses[idx].get("wet", 0) > 0:
+		return
 	combatant_statuses[idx][key] = duration
+	# Cair Prone no PRÓPRIO turno o encerra na hora (bg3.wiki/wiki/Prone); a BattleScene consome o flag.
+	if key == "prone" and idx == active_index:
+		turn_forced_end = true
+	# Ficar Wet tira a Invisibilidade (bg3.wiki/wiki/Invisible).
+	if key == "wet":
+		remove_condition(idx, "invisible")
 	if key == "charmed" and source_idx >= 0:
 		combatant_statuses[idx]["charmed_by"] = source_idx
 	if key == "frightened" and source_idx >= 0:
 		combatant_statuses[idx]["frightened_by"] = source_idx
-	if key == "paralyzed" or key == "prone":
+	# Incapacitado (Stunned/Paralyzed) e Prone quebram concentração (BG3).
+	if key == "paralyzed" or key == "prone" or key == "stun":
 		_break_concentration(idx)
+	# Wet apaga Burning (BG3).
+	if key == "wet":
+		remove_condition(idx, "burning")
+
+# Dados associados que saem junto com a condição.
+const CONDITION_COMPANIONS := {
+	"charmed": ["charmed_by"],
+	"frightened": ["frightened_by"],
+	"marked": ["marked_by", "marked_n", "marked_d"],
+}
+
+# Ponto ÚNICO para remover uma condição (expiração, Help, água, ataque...).
+func remove_condition(idx: int, key: String) -> void:
+	if idx < 0 or idx >= combatant_statuses.size():
+		return
+	combatant_statuses[idx].erase(key)
+	for k in CONDITION_COMPANIONS.get(key, []):
+		combatant_statuses[idx].erase(k)
 
 # Marca um alvo (base de Marca do Caçador): só o autor (source_idx) causa o dano
 # extra ao acertá-lo. Armazena fonte e dados do bônus no próprio status.
@@ -2842,7 +3426,7 @@ func resolve_shove(attacker_idx: int, target_idx: int, dist: int = 2) -> Diction
 		if nxt.x < 0 or nxt.x >= grid_cols or nxt.y < 0 or nxt.y >= grid_rows:
 			break
 		var tile: TerrainTile = tile_data_map[nxt.x][nxt.y]
-		if tile.object == TerrainTile.ObjectType.OBSTACLE:
+		if _fills_square(tile):
 			break
 		if _tile_occupied_by_other(nxt, target_idx):
 			break
@@ -2862,10 +3446,10 @@ func _fall_into_void(idx: int) -> void:
 	_log("%s caiu no vazio!" % TURN_QUEUE[idx]["name"], "dmg")
 	_on_death(idx)
 
-# Esconder (Hide, BG3): Ação. À vista de um inimigo (LoS direta) e SEM cobertura,
-# esconder-se é negado. Fora de vista ou em cobertura, rola Furtividade (d20 +
-# DES) vs maior Percepção passiva (10 + WIS) dos inimigos que veem. Sucesso =>
-# Oculto (Vantagem + habilita Furtivo).
+# Esconder (Hide, BG3): Ação. À vista de qualquer inimigo (linha de visão direta) é negado:
+# o jogo não tem obscuridade (BG3 permite Hide à vista só em área levemente obscurecida e fora
+# do corpo a corpo) e a Cobertura não dá exceção. Fora da linha de visão de todos, rola
+# Furtividade (d20 + DES) contra DC 10. Sucesso => Oculto (Vantagem + habilita Furtivo).
 func resolve_hide(idx: int) -> bool:
 	var me: Vector2i = combatant_positions[idx]
 	var seers: Array[int] = []
@@ -2874,30 +3458,16 @@ func resolve_hide(idx: int) -> bool:
 			continue
 		if _has_los(combatant_positions[i], me):
 			seers.append(i)
-	# À vista e sem cobertura: não dá para se esconder (BG3).
-	if not seers.is_empty() and not _is_in_cover(me):
-		_log("%s está à vista de %d inimigo(s) — precisa de cobertura para se esconder." % [TURN_QUEUE[idx]["name"], seers.size()], "miss")
+	if not seers.is_empty():
+		_log("%s está à vista de %d inimigo(s) — precisa sair da linha de visão para se esconder." % [TURN_QUEUE[idx]["name"], seers.size()], "miss")
 		return false
 	var dc := 10
-	for s in seers:
-		dc = maxi(dc, 10 + _perception_passive(s))
 	var stealth: int = DiceRoller.roll_d(20) + _acrobatics_mod(idx)
 	if stealth >= dc:
-		combatant_statuses[idx]["hidden"] = 1
+		apply_condition(idx, "hidden", 1)
 		_log("%s se escondeu (Oculto) — Furtividade %d vs DC %d" % [TURN_QUEUE[idx]["name"], stealth, dc], "status")
 		return true
 	_log("%s falhou em se esconder (%d vs DC %d)" % [TURN_QUEUE[idx]["name"], stealth, dc], "miss")
-	return false
-
-# Cobertura: tile COVER no próprio tile ou adjacente (Chebyshev ≤ 1).
-func _is_in_cover(pos: Vector2i) -> bool:
-	for dx in range(-1, 2):
-		for dy in range(-1, 2):
-			var p := pos + Vector2i(dx, dy)
-			if p.x < 0 or p.x >= grid_cols or p.y < 0 or p.y >= grid_rows:
-				continue
-			if tile_data_map[p.x][p.y].object == TerrainTile.ObjectType.COVER:
-				return true
 	return false
 
 # Quebra Oculto se algum inimigo vivo tem linha de visão até `idx` (avistado).
@@ -2909,7 +3479,7 @@ func _break_hidden_if_seen(idx: int) -> void:
 		if dead_indices.has(i) or TURN_QUEUE[i]["is_player"] == TURN_QUEUE[idx]["is_player"]:
 			continue
 		if _has_los(combatant_positions[i], me):
-			combatant_statuses[idx].erase("hidden")
+			remove_condition(idx, "hidden")
 			_log("%s foi avistado — não está mais Oculto" % TURN_QUEUE[idx]["name"], "status")
 			return
 
@@ -2939,12 +3509,19 @@ func get_enemy_vision_tiles() -> Dictionary:
 # Mergulhar arma (Dip, BG3): Ação Bônus. Sobre uma superfície de Fogo, reveste a
 # arma — os próximos ataques com arma ganham +1d4 de Fogo (cargas em coated_fire).
 func resolve_dip(idx: int) -> bool:
+	# BG3 (bg3.wiki/wiki/Dip): alcance 3 m = 2 casas, alvo = superfície "mergulhável" (só o Fogo
+	# existe no jogo) ou objeto em chamas. Sem mira própria: usa a superfície de Fogo mais próxima.
 	var pos: Vector2i = combatant_positions[idx]
-	var surf: int = tile_surfaces.get(pos, {}).get("type", SurfaceType.Type.NONE)
-	if surf != SurfaceType.Type.FIRE:
-		_log("%s não tem superfície de Fogo para mergulhar a arma." % TURN_QUEUE[idx]["name"], "miss")
+	var found := false
+	for tile_pos in tile_surfaces.keys():
+		if tile_surfaces[tile_pos].get("type", SurfaceType.Type.NONE) == SurfaceType.Type.FIRE \
+				and king_dist(tile_pos, pos) <= DIP_RANGE:
+			found = true
+			break
+	if not found:
+		_log("%s não tem superfície de Fogo ao alcance (2 casas) para mergulhar a arma." % TURN_QUEUE[idx]["name"], "miss")
 		return false
-	combatant_statuses[idx]["coated_fire"] = 3
+	apply_condition(idx, "coated_fire", 3)
 	_log("%s mergulhou a arma nas chamas! (+1d4 Fogo)" % TURN_QUEUE[idx]["name"], "status")
 	return true
 
@@ -2953,6 +3530,7 @@ func resolve_dip(idx: int) -> bool:
 # void/superfícies (ignora intermediários), mas o tile de POUSO deve ser válido
 # (não-void, sem obstáculo, desocupado). Evita Ataque de Oportunidade.
 const JUMP_MOVE_COST := 2  # 10 pés (BG3): custo de movimento FIXO por pulo
+const DIP_RANGE := 2        # 3 m (BG3): alcance de Mergulhar, em casas
 
 # Alcance máximo do pulo (Chebyshev), BG3: mín. 3 tiles (15 pés); 6 tiles (30 pés) em FOR 20.
 func jump_reach(idx: int) -> int:
@@ -2969,7 +3547,7 @@ func is_valid_jump_landing(idx: int, dest: Vector2i) -> bool:
 	if d <= 0 or d > reach:
 		return false
 	var tile: TerrainTile = tile_data_map[dest.x][dest.y]
-	if tile.is_void() or tile.object == TerrainTile.ObjectType.OBSTACLE:
+	if tile.is_void() or _fills_square(tile):
 		return false
 	if _tile_occupied_by_other(dest, idx):
 		return false
@@ -3005,17 +3583,21 @@ func resolve_throw(center: Vector2i, action: ActionData) -> void:
 	if action == null:
 		return
 	last_attack_info.clear()
-	var radius: int = maxi(0, action.aoe_radius)
+	# `center` é a mira da área (cruzamento, para a esfera); sem área, só a própria casa.
+	var tiles: Array[Vector2i] = area_footprint(action, center, active_index) \
+		if action.has_area() else ([center] as Array[Vector2i])
+	last_area_tiles = tiles
+	last_area_center = area_center(action, center, active_index) if action.has_area() else Vector2(center) + Vector2(0.5, 0.5)
 	if action.damage_dice_count > 0:
-		# Com dano: _aoe_damage_at já aplica dano + condição (via _apply_action_condition).
+		# Com dano: _area_damage já aplica dano + condição (via _apply_action_condition).
 		var base: int = DiceRoller.roll(action.damage_dice_count, action.damage_dice_sides)
-		_aoe_damage_at(center, radius, base, 0, action, [], true)
+		_area_damage(tiles, base, 0, action, [], true)
 	else:
-		# Sem dano: ainda aplica a condição a quem está no raio.
+		# Sem dano: ainda aplica a condição a quem está na área.
 		for i in range(TURN_QUEUE.size()):
 			if dead_indices.has(i):
 				continue
-			if king_dist(combatant_positions[i], center) <= radius:
+			if tiles.has(combatant_positions[i]):
 				_apply_action_condition(i, action, active_index)
 	# Superfície depositada por último (Fogo já ateia quem está em cima).
 	_deposit_surface_after_attack(center, action)
@@ -3063,7 +3645,14 @@ func _check_concentration_after_damage(combatant_idx: int, damage: int) -> void:
 	var fake_action := ActionData.new()
 	fake_action.save_attribute = ActionData.DamageAttribute.CON
 	var save_result: Dictionary = _resolve_saving_throw(combatant_idx, dc, fake_action)
-	if not save_result["saved"]:
+	# BG3 (bg3.wiki/wiki/Concentration): 20 natural no save de concentração é sucesso crítico e
+	# 1 natural é falha crítica — a única exceção à regra de saves sem auto-sucesso/falha.
+	var conc_saved: bool = save_result["saved"]
+	if int(save_result.get("roll", 0)) == 20:
+		conc_saved = true
+	elif int(save_result.get("roll", 0)) == 1:
+		conc_saved = false
+	if not conc_saved:
 		_break_concentration(combatant_idx)
 		_log("%s falhou no Save de Concentração (CD %d)!" % [TURN_QUEUE[combatant_idx]["name"], dc], "status")
 	else:
@@ -3078,6 +3667,7 @@ func is_downed(idx: int) -> bool:
 	return combatant_statuses[idx].get("downed", false)
 
 func _enter_downed(idx: int) -> void:
+	pending_downed.append(idx)   # lido pela BattleScene (vibração)
 	combatant_statuses[idx]["downed"] = true
 	combatant_statuses[idx]["death_saves_success"] = 0
 	combatant_statuses[idx]["death_saves_failure"] = 0
@@ -3200,7 +3790,7 @@ func _closest_hero_distance() -> int:
 	var best := 99999
 	for i in range(TURN_QUEUE.size()):
 		if TURN_QUEUE[i]["is_player"] and not dead_indices.has(i):
-			var d := absi(combatant_positions[i].x - origin.x) + absi(combatant_positions[i].y - origin.y)
+			var d := king_dist(combatant_positions[i], origin)
 			if d < best:
 				best = d
 	return best
@@ -3211,7 +3801,7 @@ func _pick_enemy_action_idx() -> int:
 	var edata := ALL_ENEMIES.get(enemy_type, null) as EnemyData
 	if edata == null or edata.action_behaviors.is_empty():
 		return 0
-	var cur_hp: int  = enemy_hp.get(enemy.get("name", ""), edata.max_hp)
+	var cur_hp: int  = get_hp(active_index)
 	var hp_ratio: float = float(cur_hp) / float(edata.max_hp)
 	var closest: int = _closest_hero_distance()
 	var my_status: Dictionary = combatant_statuses[active_index]
@@ -3257,14 +3847,14 @@ func _teleport_enemy() -> void:
 		for y in range(grid_rows):
 			var pos := Vector2i(x, y)
 			var t: TerrainTile = tile_data_map[x][y]
-			if t.is_void() or t.object == TerrainTile.ObjectType.OBSTACLE:
+			if t.is_void() or _fills_square(t):
 				continue
 			if _is_occupied_by_other(pos):
 				continue
 			var min_hero_dist := 99999
 			for i in range(TURN_QUEUE.size()):
 				if TURN_QUEUE[i]["is_player"] and not dead_indices.has(i):
-					var d := absi(combatant_positions[i].x - pos.x) + absi(combatant_positions[i].y - pos.y)
+					var d := king_dist(combatant_positions[i], pos)
 					if d < min_hero_dist:
 						min_hero_dist = d
 			if min_hero_dist > best_dist:
@@ -3277,7 +3867,7 @@ func _apply_enemy_self_buff(b: Dictionary) -> void:
 	var cname: String     = get_active_combatant().get("name", "?")
 	match buff_type:
 		"raging":
-			combatant_statuses[active_index]["raging"] = b.get("buff_turns", 2)
+			apply_condition(active_index, "raging", b.get("buff_turns", 2))
 			context_message = "%s entered a RAGE! +%d damage for %d turns" % [cname, b.get("buff_value", 3), b.get("buff_turns", 2)]
 			_log("%s entrou em Fúria! +%d de dano por %d turnos" % [cname, b.get("buff_value", 3), b.get("buff_turns", 2)], "status")
 		"teleporting":
@@ -3287,7 +3877,10 @@ func _apply_enemy_self_buff(b: Dictionary) -> void:
 
 func _apply_enemy_aoe_attack(b: Dictionary) -> Dictionary:
 	var origin: Vector2i   = combatant_positions[active_index]
-	var radius: int        = b.get("aoe_radius", 1)
+	# Emanação (D&D 2024) a partir do espaço do inimigo, com o tamanho em pés do comportamento.
+	var aoe_tiles: Array[Vector2i] = AreaShape.emanation(origin, int(b.get("aoe_ft", 5)))
+	last_area_tiles = aoe_tiles
+	last_area_center = Vector2(origin) + Vector2(0.5, 0.5)
 	var damage_mult: float = b.get("damage_mult", 1.0)
 	var enemy_type: String = get_active_combatant().get("type", "")
 	var edata_a    := ALL_ENEMIES.get(enemy_type, null) as EnemyData
@@ -3304,24 +3897,17 @@ func _apply_enemy_aoe_attack(b: Dictionary) -> Dictionary:
 	var dice_cnt: int = edata_a.damage_dice_count if edata_a != null else 1
 	var dice_s: int   = edata_a.damage_dice_sides if edata_a != null else 6
 	var first_target: Vector2i = Vector2i(-1, -1)
-	var total_damage := 0
+	var aoe_dtype: int = _enemy_attack_type(b)
 	for i in range(TURN_QUEUE.size()):
 		if not TURN_QUEUE[i]["is_player"] or dead_indices.has(i):
 			continue
-		var dist := king_dist(combatant_positions[i], origin)
-		if dist > radius:
+		if not aoe_tiles.has(combatant_positions[i]):
 			continue
-		var damage: int   = maxi(1, int(DiceRoller.roll(dice_cnt, dice_s) * damage_mult) + aoe_attr_mod + atk_bonus)
+		var raw: int      = maxi(1, int(DiceRoller.roll(dice_cnt, dice_s) * damage_mult) + aoe_attr_mod + atk_bonus)
 		var tname: String = TURN_QUEUE[i]["name"]
-		var pidx: int     = _player_index_by_name(tname)
-		if pidx >= 0:
-			PLAYERS[pidx]["hp"] = maxi(0, PLAYERS[pidx]["hp"] - damage)
-			_check_concentration_after_damage(i, damage)
-			if PLAYERS[pidx]["hp"] <= 0:
-				_on_death(i)
-		total_damage += damage
+		var damage: int   = _deal_damage_to_combatant(i, raw, aoe_dtype)
 		battle_stats["enemy_damage_dealt"] = battle_stats.get("enemy_damage_dealt", 0) + damage
-		_register_damage_floater(i, damage, ActionData.damage_type_color(ActionData.DamageType.COLD), "")
+		_register_damage_floater(i, damage, ActionData.damage_type_color(aoe_dtype), "")
 		_log("%s acertou %s por %d (AoE)" % [get_active_combatant()["name"], tname, damage], "dmg")
 		if b.get("applies_status", "") != "":
 			_maybe_apply_stun(i, b.get("status_chance", 0.0), get_active_combatant()["name"])
@@ -3340,3 +3926,10 @@ func get_tile(col: int, row: int) -> TerrainTile:
 	if col < 0 or col >= grid_cols or row < 0 or row >= grid_rows:
 		return null
 	return tile_data_map[col][row]
+
+# Cego (BG3, bg3.wiki/wiki/Blinded): "Range of attacks and spells reduced to 3 m (10 ft)" = 2 casas.
+const BLINDED_RANGE := 2
+func _blind_capped_range(idx: int, attack_range: int) -> int:
+	if combatant_statuses[idx].get("blinded", 0) > 0:
+		return mini(attack_range, BLINDED_RANGE)
+	return attack_range

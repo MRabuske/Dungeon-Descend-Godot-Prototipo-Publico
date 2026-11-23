@@ -160,16 +160,9 @@ func update_all_combatant_ui(state: BattleState) -> void:
 		
 		var combatant: Dictionary = BattleState.TURN_QUEUE[i]
 		
-		if combatant["is_player"]:
-			var player_idx := _find_player_index(combatant["name"])
-			if player_idx >= 0:
-				var player: Dictionary = BattleState.PLAYERS[player_idx]
-				node.update_hp(player["hp"], player["max_hp"])
-		else:
-			var cname: String = combatant["name"]
-			var hp: int = state.enemy_hp.get(cname, 0)
-			var max_hp: int = state.get_enemy_max_hp(i)
-			node.update_hp(hp, max_hp)
+		# HP pelo índice da fila (a divisão PLAYERS/enemy_hp fica no BattleState).
+		if not combatant["is_player"] or state.player_index_of(i) >= 0:
+			node.update_hp(state.get_hp(i), state.get_max_hp(i))
 		
 		if i < state.combatant_statuses.size():
 			node.update_status(state.combatant_statuses[i])
@@ -199,11 +192,6 @@ func update_single_combatant_hp(idx: int, hp: int, max_hp: int) -> void:
 # ======================================================
 # HELPER PRIVADO
 # ======================================================
-func _find_player_index(player_name: String) -> int:
-	for i in range(BattleState.PLAYERS.size()):
-		if BattleState.PLAYERS[i]["name"] == player_name:
-			return i
-	return -1
 
 # ======================================================
 # WRAPPERS DE ANIMAÇÃO

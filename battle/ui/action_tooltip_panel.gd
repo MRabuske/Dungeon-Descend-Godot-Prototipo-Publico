@@ -13,7 +13,10 @@ var _damage_lbl: RichTextLabel
 var _range_lbl:  Label
 var _cost_lbl:   Label
 
-var _pending_action: ActionData = null
+# Ação (ActionData) ou item de consumível (Dictionary) a mostrar.
+var _pending_subject: Variant = null
+# Retângulo global do item selecionado por teclado/controle; vazio = posiciona no mouse.
+var _anchor: Rect2 = Rect2()
 var _timer_active: bool = false
 
 func _ready() -> void:
@@ -67,40 +70,81 @@ func _make_rich_lbl(font_size: int, color: Color) -> RichTextLabel:
 	l.custom_minimum_size.x = 190.0
 	return l
 
-# Schedules the tooltip to appear for `action` after HOVER_DELAY. Calling again
-# with a new action before the delay elapses just swaps the pending action.
-func show_for(action: ActionData) -> void:
-	if action == null:
+# Agenda o painel para `subject` (ActionData ou Dictionary de item) após HOVER_DELAY.
+# Chamar de novo antes do atraso só troca o alvo pendente. Já visível, troca o conteúdo na
+# hora (a seleção por teclado/controle anda célula a célula e o painel acompanha). `anchor`
+# (retângulo global do item selecionado) posiciona o painel junto ao item; sem ele, no mouse.
+func show_for(subject: Variant, anchor: Rect2 = Rect2()) -> void:
+	if subject == null:
 		hide_tooltip()
 		return
-	_pending_action = action
+	_pending_subject = subject
+	_anchor = anchor
+	if visible:
+		_show_now()
+		return
 	if _timer_active:
 		return
 	_timer_active = true
 	var t := get_tree().create_timer(HOVER_DELAY)
 	t.timeout.connect(func() -> void:
 		_timer_active = false
-		if _pending_action == null:
-			return
-		_populate(_pending_action)
-		visible = true
-		_reposition()
+		if _pending_subject != null:
+			_show_now()
 	)
 
+func _show_now() -> void:
+	_populate(_pending_subject)
+	visible = true
+	_reposition()
+
 func hide_tooltip() -> void:
-	_pending_action = null
+	_pending_subject = null
 	visible = false
 
 func _reposition() -> void:
 	reset_size()
+	var vp := get_viewport_rect().size
+	if _anchor.size != Vector2.ZERO:
+		position = ActionTooltipPanel.place(_anchor, size, vp)
+		return
 	var mouse := get_global_mouse_position()
 	var pos := mouse - Vector2(size.x * 0.5, size.y + 14.0)
-	var vp := get_viewport_rect().size
 	pos.x = clampf(pos.x, 4.0, vp.x - size.x - 4.0)
 	pos.y = clampf(pos.y, 4.0, vp.y - size.y - 4.0)
 	position = pos
 
-func _populate(action: ActionData) -> void:
+# Posição do painel junto a `anchor`: acima do item (a HUD fica na base da tela); se não
+# couber, abaixo; se também não, ao lado. Sempre dentro da tela e sem cobrir o item.
+static func place(anchor: Rect2, panel_size: Vector2, viewport: Vector2) -> Vector2:
+	var margin := 4.0
+	var gap := 8.0
+	var x := clampf(anchor.get_center().x - panel_size.x * 0.5, margin, viewport.x - panel_size.x - margin)
+	var above := anchor.position.y - panel_size.y - gap
+	if above >= margin:
+		return Vector2(x, above)
+	var below := anchor.end.y + gap
+	if below + panel_size.y <= viewport.y - margin:
+		return Vector2(x, below)
+	var y := clampf(anchor.get_center().y - panel_size.y * 0.5, margin, viewport.y - panel_size.y - margin)
+	var right := anchor.end.x + gap
+	if right + panel_size.x <= viewport.x - margin:
+		return Vector2(right, y)
+	return Vector2(maxf(margin, anchor.position.x - panel_size.x - gap), y)
+
+# Descrição de um item consumível (Poção): o mesmo texto da barra de confirmação.
+static func item_description(item: Dictionary) -> String:
+	if item.has("heal_dice"):
+		var flat: int = int(item.get("heal_flat", 0))
+		return "Restaura %dd%d%s HP e apaga Em Chamas%s" % [item["heal_dice"], item["heal_sides"],
+			"+%d" % flat if flat > 0 else "", ". Ação Bônus." if item.get("bonus_action", false) else "."]
+	return ""
+
+func _populate(subject: Variant) -> void:
+	if subject is Dictionary:
+		_populate_item(subject)
+		return
+	var action: ActionData = subject
 	_name_lbl.text = action.label
 
 	var desc := _desc_text(action)
@@ -118,6 +162,17 @@ func _populate(action: ActionData) -> void:
 	var cost := _cost_text(action)
 	_cost_lbl.text = cost
 	_cost_lbl.visible = cost != ""
+
+# Item consumível: nome, efeito e quantidade (sem dano/alcance).
+func _populate_item(item: Dictionary) -> void:
+	_name_lbl.text = str(item.get("label", "Item"))
+	var desc := ActionTooltipPanel.item_description(item)
+	_desc_lbl.text = desc
+	_desc_lbl.visible = desc != ""
+	_damage_lbl.visible = false
+	_range_lbl.visible = false
+	_cost_lbl.text = "Quantidade: %d" % int(item.get("count", 0))
+	_cost_lbl.visible = true
 
 # ── Pure text builders (unit-tested) ───────────────────────────────────────────
 func _damage_text(action: ActionData) -> String:
@@ -165,8 +220,8 @@ func _desc_text(action: ActionData) -> String:
 	if action == null:
 		return ""
 	var parts: Array[String] = []
-	if action.aoe_radius > 0:
-		parts.append("Área de efeito: raio %d" % action.aoe_radius)
+	if action.has_area():
+		parts.append("Área de efeito: " + action.area_text())
 	if action.applies_condition != "":
 		parts.append("Aplica: %s" % StatusDefinitions.name_of(action.applies_condition))
 	if action.bonus_action:

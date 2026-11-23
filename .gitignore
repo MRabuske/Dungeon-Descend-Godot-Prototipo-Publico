@@ -1,9 +1,28 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
-*.uid
-docs/
-.claude/
+# *.uid de scripts e shaders SÃO versionados (a Godot recomenda): sem eles cada checkout gera UIDs
+# novos e as cenas que referenciam uid:// avisam "invalid UID". Só o addon de terceiros fica
+# idêntico ao upstream, sem os .uid gerados localmente.
+addons/**/*.uid
 refs/
+
+# Claude Code: so a config compartilhavel e versionada (CLAUDE.md, .claude/agents, .claude/rules,
+# skills-lock.json). Tudo o mais em .claude/ fica local: settings.local.json, backups/ e skills/
+# (copias de terceiros; reinstalar a partir de skills-lock.json, respeitando as licencas deles).
+.claude/*
+!.claude/agents/
+!.claude/rules/
+.superpowers/
+# Bug do AutoMode quando HOME nao existe: grava em undefined/.claude/... relativo ao cwd
+undefined/
+
+# Segredos, logs e temporarios
+.env
+.env.*
+*.log
+*.tmp
+*.bak
+
 # Pasta local de prompts — NUNCA commitar (mantida só localmente)
 prompts/

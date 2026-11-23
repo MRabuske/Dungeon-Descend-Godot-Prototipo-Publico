@@ -10,7 +10,7 @@ func _init() -> void:
 	bonus_action      = true
 	proj_color        = Color.WHITE
 	damage_attribute  = DamageAttribute.DEX
-	damage_type       = DamageType.PHYSICAL
+	damage_type       = DamageType.BLUDGEONING
 	damage_dice_count = 1
 	damage_dice_sides = 4
 	icon 			  = preload("res://assets/ui/icons/attacks/atq_rapido.png")

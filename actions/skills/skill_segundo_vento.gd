@@ -9,4 +9,5 @@ func _init() -> void:
 	self_target = true
 	pp          = 1
 	max_pp      = 1
+	bonus_action = true   # BG3: Ação Bônus
 	icon 		= preload("res://assets/ui/icons/skills/segundo_vento.png")

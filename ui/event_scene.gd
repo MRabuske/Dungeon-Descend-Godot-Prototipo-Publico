@@ -63,6 +63,9 @@ func _ready() -> void:
 
 	_build_background()
 	_build_ui()
+	HintBar.attach_bottom(self, [[&"navigate", "Navegar"], [&"confirm", "Escolher"]])
+	if not _choice_buttons.is_empty():
+		_choice_buttons[0].grab_focus.call_deferred()
 
 # ======================================================
 # BUILD — BACKGROUND
@@ -235,6 +238,7 @@ func _on_choice(choice: EventData.EventChoice) -> void:
 	_result_lbl.text = result
 	_result_lbl.visible = true
 	_continue_btn.visible = true
+	_continue_btn.grab_focus()
 
 func _apply_one(ctype: int, value: int, target: String) -> String:
 	var C := EventData.ConsequenceType
@@ -324,5 +328,6 @@ func _make_button(text: String) -> TextureButton:
 	lbl.add_theme_constant_override("shadow_offset_x", 1)
 	lbl.add_theme_constant_override("shadow_offset_y", 1)
 	btn.add_child(lbl)
+	FocusGlow.attach(btn)
 
 	return btn

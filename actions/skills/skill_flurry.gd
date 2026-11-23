@@ -11,7 +11,7 @@ func _init() -> void:
 	hit_count         = 2
 	attack_range      = 1
 	damage_attribute  = DamageAttribute.DEX
-	damage_type       = DamageType.PHYSICAL
+	damage_type       = DamageType.BLUDGEONING
 	damage_dice_count = 1
 	damage_dice_sides = 6
 	icon 		      = preload("res://assets/ui/icons/skills/flurry.png")

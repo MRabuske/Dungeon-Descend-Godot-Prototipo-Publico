@@ -11,7 +11,8 @@ func _init() -> void:
 	shape             = SHAPE_CIRCLE
 	color_idx         = COLOR_ITEM
 	attack_range      = 6
-	aoe_radius        = 1
+	area_kind        = AreaShape.Kind.SPHERE
+	area_size_ft     = 5
 	damage_attribute  = DamageAttribute.NONE
 	damage_type       = DamageType.FIRE
 	damage_dice_count = 2

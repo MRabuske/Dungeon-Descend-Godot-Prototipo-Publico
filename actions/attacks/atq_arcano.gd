@@ -9,9 +9,10 @@ func _init() -> void:
 	attack_range     = 10
 	proj_color       = Color(0.6, 0.4, 1.0)
 	damage_attribute = DamageAttribute.INT
-	damage_type      = DamageType.ARCANE
+	damage_type      = DamageType.FORCE
 	damage_dice_count = 1
 	damage_dice_sides = 10
 	icon	 		 = preload("res://assets/ui/icons/attacks/atq_arcano.png")
 	sfx_cast = "whoosh_magic"
 	sfx_impact = "silent"
+	is_spell         = true

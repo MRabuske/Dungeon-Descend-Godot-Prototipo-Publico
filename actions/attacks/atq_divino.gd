@@ -13,3 +13,4 @@ func _init() -> void:
 	damage_dice_count = 1
 	damage_dice_sides = 8
 	icon 			 = preload("res://assets/ui/icons/attacks/atq_divino.png")
+	is_spell         = true

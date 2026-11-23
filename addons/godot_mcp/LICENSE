@@ -1,0 +1,90 @@
+Signal compose Source-Available License v1.0
+
+Copyright (c) 2026 Signal compose Inc.
+
+================================================================================
+WHY THIS LICENSE
+================================================================================
+
+This license exists to:
+- Enable free use for individuals, startups, and small businesses
+- Ensure sustainable development through fair contributions from successful companies
+- Protect the software from being resold as a competing product
+
+We want to support developers, not restrict them.
+
+================================================================================
+BASE LICENSE
+================================================================================
+
+This software is licensed under the Apache License, Version 2.0 (the "Base
+License"), with the additional conditions below.
+
+You may obtain a copy of the Apache License at:
+https://www.apache.org/licenses/LICENSE-2.0
+
+All rights granted under the Apache License 2.0 (use, copy, modify, distribute)
+remain in effect, subject to the following additional conditions.
+
+================================================================================
+COMMONS CLAUSE (v1.0)
+================================================================================
+
+The grant of rights under this License does not include the right to Sell the
+Software.
+
+"Sell" means providing the Software to third parties for a fee or other
+consideration, where the value derives entirely or substantially from the
+Software's functionality. This includes hosting or consulting services whose
+primary value is the Software itself.
+
+Internal use within your organization is always permitted.
+
+================================================================================
+FAIR REVENUE CLAUSE
+================================================================================
+
+Commercial license requirements are based on your organization's annual revenue.
+The license is granted per developer seat (each individual who uses the Software)
+and is perpetual for the current major version (a one-time fee per seat).
+
+Tier 1 — Annual revenue up to $250,000 USD:
+  Free. No commercial license required.
+
+Tier 2 — Annual revenue $250,001 to $1,000,000 USD:
+  Commercial license required.
+  - Perpetual: $1,200 per seat (one-time, current major version)
+
+Tier 3 — Annual revenue over $1,000,000 USD:
+  Commercial license required.
+  - Perpetual: $4,000 per seat (one-time, current major version)
+
+Grace period: 90 days from exceeding a tier threshold.
+
+ACADEMIC EXCEPTION:
+Students and faculty of accredited educational institutions are exempt from
+commercial license requirements, provided their use is non-commercial (research,
+coursework, and teaching purposes only).
+
+SCOPE OF THE COMMERCIAL LICENSE:
+The commercial license grants only the right to use the Software for commercial
+purposes. It is a usage license, not a service agreement. Paying for a commercial
+license does not entitle you to any additional deliverable, support, maintenance,
+updates, service-level commitment, or warranty beyond what is publicly available
+to all users at no charge. The Software is provided "AS IS" to every user equally,
+regardless of tier (see DISCLAIMER below). Support, if desired, is available only
+under a separate written agreement.
+
+Contact: licensing@signalcompose.com
+Purchase: http://product.signalcompose.com/
+Sponsor:  https://github.com/sponsors/signalcompose
+
+================================================================================
+DISCLAIMER
+================================================================================
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. See the Apache License 2.0 for the full disclaimer and limitation of
+liability terms.
+
+================================================================================

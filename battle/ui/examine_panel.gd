@@ -58,6 +58,7 @@ func _ready() -> void:
 	anchor_bottom = 1.0
 	z_index       = 950
 	_build()
+	HintBar.attach_bottom(self, [[&"navigate", "Combatente"], [&"back", "Fechar"]])
 	modulate.a   = 0.0
 	visible      = false
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -302,9 +303,9 @@ func show_for(state: BattleState, idx: int) -> void:
 		name_str       = hd.hero_name    if hd else hero_name
 		type_str       = hd.hero_class   if hd else ""
 		level_val      = hd.level        if hd else 0
-		max_hp_val     = hd.max_hp       if hd else 0
-		current_hp     = pd.get("hp", max_hp_val)
-		ac_val         = hd.ac           if hd else 0
+		max_hp_val     = state.get_max_hp(idx)
+		current_hp     = state.get_hp(idx)
+		ac_val         = int(pd.get("ac", hd.ac if hd else 0))
 		str_v          = hd.strength     if hd else 0
 		dex_v          = hd.dexterity    if hd else 0
 		con_v          = hd.constitution if hd else 0
@@ -321,11 +322,11 @@ func show_for(state: BattleState, idx: int) -> void:
 		var enemy_type: String = combatant.get("type", "")
 		var ename: String      = combatant.get("name", "")
 		var ed: EnemyData      = BattleState.ALL_ENEMIES.get(enemy_type, null)
-		name_str       = ed.enemy_name    if ed else ename
+		name_str       = ename   # nome único da fila ("Goblin Scout 2")
 		type_str       = ed.enemy_type    if ed else ""
 		level_val      = ed.level         if ed else 0
-		max_hp_val     = ed.max_hp        if ed else 0
-		current_hp     = state.enemy_hp.get(ename, max_hp_val)
+		max_hp_val     = state.get_max_hp(idx)
+		current_hp     = state.get_hp(idx)
 		ac_val         = ed.ac            if ed else 0
 		str_v          = ed.strength      if ed else 0
 		dex_v          = ed.dexterity     if ed else 0
@@ -355,6 +356,9 @@ func show_for(state: BattleState, idx: int) -> void:
 	_populate_text_section(_immunities_box, immunities)
 	_populate_text_section(_features_box, features)
 
+	# Já aberto (trocando de combatente com ←/→): atualiza sem refazer o fade-in.
+	if visible and modulate.a >= 0.99:
+		return
 	visible    = true
 	modulate.a = 0.0
 	create_tween().tween_property(self, "modulate:a", 1.0, 0.18)
@@ -482,7 +486,9 @@ func _build_section_with_header(parent: VBoxContainer, title: String, content_bo
 	measure_label.add_theme_font_size_override("font_size", FONT_SECTION)
 	header_wrapper.add_child(measure_label)
 	
-	await get_tree().process_frame
+	# Fora da árvore (testes) get_tree() é null: mede direto, sem esperar o frame.
+	if is_inside_tree():
+		await get_tree().process_frame
 	var text_size := measure_label.get_minimum_size()
 	measure_label.queue_free()
 	

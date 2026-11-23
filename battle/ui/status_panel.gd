@@ -463,8 +463,8 @@ func _show_enemy(enemy: Dictionary, idx: int) -> void:
 	_name_lbl.text  = enemy["name"]
 	_class_lbl.text = "Enemy · %s" % enemy["type"]
 
-	var hp: int     = _state.enemy_hp.get(enemy["name"], 0)
-	var max_hp: int = _state.get_enemy_max_hp(idx)
+	var hp: int     = _state.get_hp(idx)
+	var max_hp: int = _state.get_max_hp(idx)
 	var hp_ratio    := float(hp) / float(max_hp) if max_hp > 0 else 0.0
 	_hp_bar.value    = hp_ratio
 	_hp_val_lbl.text = "%d / %d" % [hp, max_hp]
@@ -644,8 +644,8 @@ func _get_portrait_from_player(player: Dictionary) -> Texture2D:
 	if portrait and portrait is Texture2D:
 		return portrait
 	var hero_data = BattleState.ALL_HERO_DATA.get(player["name"])
-	if hero_data and hero_data.has("portrait"):
-		return hero_data.portrait
+	if hero_data:
+		return hero_data.portrait   # HeroData.portrait (Resource não tem has())
 	return null
 
 func _get_portrait_from_enemy(enemy: Dictionary) -> Texture2D:
@@ -656,8 +656,7 @@ func _get_portrait_from_enemy(enemy: Dictionary) -> Texture2D:
 			var portrait = enemy_data.to_combat_dict().get("portrait")
 			if portrait and portrait is Texture2D:
 				return portrait
-		if enemy_data.has("portrait"):
-			return enemy_data.portrait
+		return enemy_data.get("portrait")
 	return null
 
 func _get_status_icon_texture(effect_type: int) -> Texture2D:

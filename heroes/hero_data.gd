@@ -54,7 +54,6 @@ const _HALF_SLOTS: Array = [
 
 @export_group("Atributos de Combate")
 @export var ac:               int = 10
-@export var initiative:       int = 5
 @export var speed:            int = 5
 @export var proficiency:      int = 2
 @export var damage_reduction: int = 0
@@ -92,7 +91,6 @@ func to_combat_dict() -> Dictionary:
 		"ki":              ki_max(),
 		"ki_max":          ki_max(),
 		"ac":           ac,
-		"initiative":   initiative,
 		"speed":        speed,
 		"proficiency":      proficiency,
 		"damage_reduction": damage_reduction,
@@ -142,7 +140,8 @@ var reactions: Array[ActionData] = []
 # Factory para criar a arma equipada de cada herói em uma linha.
 static func make_weapon(wname: String, dcount: int, dsides: int,
 		attr: ActionData.DamageAttribute, finesse: bool = false,
-		versatile: int = 0) -> WeaponData:
+		versatile: int = 0,
+		dtype: ActionData.DamageType = ActionData.DamageType.BLUDGEONING) -> WeaponData:
 	var w := WeaponData.new()
 	w.weapon_name         = wname
 	w.damage_dice_count   = dcount
@@ -150,4 +149,5 @@ static func make_weapon(wname: String, dcount: int, dsides: int,
 	w.damage_attribute    = attr
 	w.is_finesse          = finesse
 	w.versatile_dice_sides = versatile
+	w.damage_type          = dtype
 	return w

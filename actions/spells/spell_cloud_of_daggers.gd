@@ -12,13 +12,15 @@ func _init() -> void:
 	color_idx              = COLOR_SPELL
 	spell_slot_level       = 2
 	attack_range           = 10
-	aoe_radius             = 0
+	area_kind              = AreaShape.Kind.CUBE
+	area_size_ft           = 5
 	proj_color             = Color(0.6, 0.1, 0.9)
 	damage_dice_count      = 4
 	damage_dice_sides      = 4
 	damage_attribute       = DamageAttribute.NONE
-	damage_type            = DamageType.PHYSICAL
+	damage_type            = DamageType.SLASHING
 	requires_concentration = true
 	creates_surface        = SurfaceType.Type.CLOUD_OF_DAGGERS
 	requires_saving_throw  = false
 	is_weapon_attack       = false
+	is_spell         = true

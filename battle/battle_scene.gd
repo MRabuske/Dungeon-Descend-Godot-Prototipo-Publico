@@ -24,6 +24,7 @@ var _status_panel: StatusPanel
 var _action_panel: ActionPanel
 var _log_panel: CombatLogPanel
 var _log_toggle_btn: Button
+var _hint_bar: HintBar
 var _end_turn_btn: Button
 var _result_screen: BattleResultScreen
 var _pause_menu: PauseMenu
@@ -33,6 +34,9 @@ var _context_menu:  ContextMenu
 var _action_tooltip: ActionTooltipPanel
 var _enemy_info_panel: EnemyInfoPanel
 var _animating: bool = false
+# Painel de detalhes aberto pela navegação por teclado/controle (não pelo hover do mouse).
+var _nav_tip_active: bool = false
+var _hud_tip_allowed_prev: bool = false
 var _camera_shake: CameraShake
 var _screen_flash: ScreenFlash
 var _pending_end_turn_action: ActionData = null
@@ -44,6 +48,11 @@ var _pending_attack_action: ActionData = null
 var _reaction_popup: ReactionPopup = null
 var _reaction_pending: bool = false
 var _pending_reaction_queue: Array[Dictionary] = []
+# Exame de combatentes pela barra de turnos (Y/Tab): barra -> menu "Examinar" -> painel.
+enum ExamineFocus { NONE, BAR, MENU, PANEL }
+var _examine_focus: ExamineFocus = ExamineFocus.NONE
+var _examine_idx: int = -1            # índice de TURN_QUEUE em exame
+var _examine_via_bar: bool = false    # false = aberto pelo clique direito do mouse
 
 # ======================================================
 # READY
@@ -151,6 +160,7 @@ func _build_hud(parent: Control) -> void:
 	var sb_p: StyleBoxFlat = sb_n.duplicate()
 	sb_p.bg_color = Color(0.10, 0.35, 0.14)
 	_end_turn_btn.add_theme_stylebox_override("pressed", sb_p)
+	_end_turn_btn.focus_mode = Control.FOCUS_NONE   # só mouse: com foco, Enter/A o acionaria
 	_end_turn_btn.pressed.connect(_on_end_turn_pressed)
 	hud.add_child(_end_turn_btn)
 
@@ -175,14 +185,17 @@ func _build_hud(parent: Control) -> void:
 	_log_toggle_btn.add_theme_font_size_override("font_size", 14)
 	_log_toggle_btn.set_anchor_and_offset(SIDE_RIGHT,  1.0, -12)
 	_log_toggle_btn.set_anchor_and_offset(SIDE_LEFT,   1.0, -46)
-	_log_toggle_btn.pressed.connect(func() -> void:
-		if _log_panel.visible:
-			_log_panel.hide()
-		else:
-			_log_panel.show()
-			_log_panel.refresh()
-	)
+	_log_toggle_btn.focus_mode = Control.FOCUS_NONE
+	_log_toggle_btn.pressed.connect(_toggle_log)
 	add_child(_log_toggle_btn)
+
+	# Dicas de botões: canto inferior esquerdo da área de combate, acima da HUD.
+	_hint_bar = HintBar.new()
+	_hint_bar.z_index = 150   # acima dos sprites do grid
+	_hint_bar.alignment = BoxContainer.ALIGNMENT_BEGIN
+	_hint_bar.set_anchor_and_offset(SIDE_LEFT,  0.0, 12)
+	_hint_bar.set_anchor_and_offset(SIDE_RIGHT, 0.75, 0)
+	add_child(_hint_bar)
 	_position_hud_overlays()
 
 # Reposiciona os overlays do log (painel + toggle) logo acima da HUD, acompanhando
@@ -194,6 +207,9 @@ func _position_hud_overlays() -> void:
 	_log_panel.set_anchor_and_offset(SIDE_TOP,    1.0, -_hud_h - 300)
 	_log_toggle_btn.set_anchor_and_offset(SIDE_BOTTOM, 1.0, -_hud_h - 12)
 	_log_toggle_btn.set_anchor_and_offset(SIDE_TOP,    1.0, -_hud_h - 46)
+	if _hint_bar != null:
+		_hint_bar.set_anchor_and_offset(SIDE_BOTTOM, 1.0, -_hud_h - 8)
+		_hint_bar.set_anchor_and_offset(SIDE_TOP,    1.0, -_hud_h - 34)
 
 func _on_hud_height_changed(h: int) -> void:
 	_hud_h = h
@@ -235,6 +251,7 @@ func _connect_signals() -> void:
 
 	_action_panel.grid_action_clicked.connect(_on_grid_action_clicked)
 	_action_panel.grid_action_hovered.connect(_on_action_hovered)
+	_action_panel.grid_nav_selected.connect(_on_nav_selected)
 
 	_battle_area.tile_clicked.connect(_on_tile_clicked)
 	_battle_area.tile_hovered.connect(_on_tile_hovered)
@@ -270,6 +287,7 @@ func _connect_signals() -> void:
 		_refresh_ui()
 	)
 	_turn_bar.slot_right_clicked.connect(_on_portrait_right_clicked)
+	_turn_bar.slot_clicked.connect(_switch_hero_to)
 
 # ======================================================
 # HELPERS — ROOM TYPE
@@ -307,6 +325,23 @@ func _refresh_ui() -> void:
 	if not is_inside_tree() or _state == null:
 		return
 
+	# Heróis que acabaram de ficar Downed (qualquer origem de dano) → vibração.
+	for _downed_idx: int in _state.pending_downed:
+		InputDevice.rumble(InputRumble.DOWNED)
+	_state.pending_downed.clear()
+
+	# Herói ativo ficou incapaz no meio do bloco (Downed, Atordoado, Paralisado): o controle passa sozinho
+	# ao próximo disponível; se não há mais ninguém, a vez passa (bloco terminado).
+	if not _animating and not _reaction_pending and _state.battle_result.is_empty() \
+			and _state.current_state == BattleState.State.PLAYER_TURN:
+		match _state.pass_control_if_incapable():
+			1:
+				_clear_pending_actions()
+			2:
+				_state.advance_turn()
+				_after_advance()
+				return
+
 	if not _animating:
 		_battle_area._combatant_layer.sync_visual_positions(
 			_state, 
@@ -318,14 +353,41 @@ func _refresh_ui() -> void:
 	_turn_bar.refresh(BattleState.TURN_QUEUE, _state.active_index, _state)
 	_battle_area.refresh(_state.active_index)
 	_action_panel.refresh()
+	# O mesmo botão encerra o turno do herói ativo e, num herói que já encerrou, cancela o fim de turno.
+	_end_turn_btn.text = "↩\nVOLTAR" if _state.active_ended() else "⏳\nFIM"
 	_status_panel.refresh(_state.active_index)  # 👈 ISSO que atualiza os portraits!
 	_log_panel.refresh()
 	_update_attack_outlines()
+	_update_hints()
+
+# Dicas de botões conforme o contexto do combate (os popups têm as suas próprias).
+func _update_hints() -> void:
+	if _hint_bar == null or _state == null:
+		return
+	var hints: Array = []
+	if _reaction_pending or _pause_menu.visible or not _state.battle_result.is_empty():
+		hints = []
+	elif _examine_focus != ExamineFocus.NONE:
+		hints = [[&"navigate", "Combatente"], [&"confirm", "Examinar"], [&"back", "Voltar"]]
+	elif _action_panel._action_bar_active:
+		hints = [[&"confirm", "Confirmar"], [&"back", "Cancelar"]]
+	elif _state.current_state == BattleState.State.MOVE_MODE or _state.current_state == BattleState.State.ATTACK_MODE:
+		hints = [[&"cursor", "Cursor"], [&"navigate", "Quadrado"], [&"confirm", "Confirmar"],
+			[&"back", "Cancelar"], [&"camera", "Câmera"], [&"zoom", "Zoom"]]
+	elif _state.current_state == BattleState.State.PLAYER_TURN:
+		hints = [[&"navigate", "Ação"], [&"confirm", "Usar"], [&"tabs", "Filtro"],
+			[&"end_turn", "Cancelar fim de turno" if _state.active_ended() else "Fim de turno"],
+			[&"examine", "Examinar"], [&"los", "Visão inimiga"], [&"log", "Log"], [&"pause", "Pausa"]]
+		if _state.switchable_members().size() > 1:
+			hints.insert(1, [&"switch_hero", "Trocar herói"])
+	_hint_bar.set_hints(hints)
 
 # ======================================================
 # INPUT
 # ======================================================
 func _input(event: InputEvent) -> void:
+	if _handle_action_event(event):
+		return
 	if not event is InputEventKey or not (event as InputEventKey).pressed:
 		return
 	var key := (event as InputEventKey).keycode
@@ -350,6 +412,11 @@ func _input(event: InputEvent) -> void:
 	if _animating:
 		return
 
+	_sync_examine_state()
+	if _examine_focus != ExamineFocus.NONE:
+		_handle_examine_key(event as InputEventKey)
+		return
+
 	if _action_panel._action_bar_active:
 		_handle_action_bar(event as InputEventKey)
 		return
@@ -360,21 +427,169 @@ func _input(event: InputEvent) -> void:
 		BattleState.State.ATTACK_MODE:  _handle_attack_mode(event as InputEventKey)
 
 # ======================================================
+# INPUT — COMANDOS DO COMBATE (actions: X, Y/Tab, View, R3)
+# ======================================================
+# Eventos de joypad só valem com o controle já ativo: o botão que o "acorda" apenas
+# troca o dispositivo (a cena roda antes do autoload InputDevice).
+func _handle_action_event(event: InputEvent) -> bool:
+	if event is InputEventJoypadButton and not InputDevice.is_gamepad():
+		return false
+	var act: StringName = &""
+	for a: StringName in [InputBindings.END_TURN, InputBindings.EXAMINE, InputBindings.LOG, InputBindings.ZOOM_CYCLE, InputBindings.SWITCH_HERO]:
+		if event.is_action_pressed(a, false):
+			act = a
+			break
+	if act == &"":
+		return false
+	get_viewport().set_input_as_handled()
+	if _pause_menu.visible:
+		return true
+	match act:
+		InputBindings.LOG:
+			_toggle_log()
+		InputBindings.ZOOM_CYCLE:
+			_battle_area.cycle_zoom()
+		InputBindings.SWITCH_HERO:
+			_switch_hero_to_next()
+		InputBindings.END_TURN:
+			# Mesmos bloqueios do botão FIM: nada durante animação, reação ou exame.
+			if not _reaction_pending and _examine_focus == ExamineFocus.NONE \
+					and not _action_panel._action_bar_active \
+					and _state.battle_result.is_empty():
+				_on_end_turn_pressed()
+		InputBindings.EXAMINE:
+			if not _reaction_pending and not _animating and _examine_focus == ExamineFocus.NONE \
+					and not _action_panel._action_bar_active \
+					and _state.current_state == BattleState.State.PLAYER_TURN \
+					and _state.battle_result.is_empty():
+				_enter_examine()
+	return true
+
+func _toggle_log() -> void:
+	if _log_panel.visible:
+		_log_panel.hide()
+	else:
+		_log_panel.show()
+		_log_panel.refresh()
+
+# ======================================================
+# EXAME DE COMBATENTES (barra de turnos)
+# ======================================================
+func _enter_examine() -> void:
+	var idx: int = _state.examine_step(_state.active_index, 0)
+	if idx < 0:
+		return
+	_examine_idx = idx
+	_examine_via_bar = true
+	_examine_focus = ExamineFocus.BAR
+	_apply_examine_highlight()
+
+func _exit_examine() -> void:
+	_examine_focus = ExamineFocus.NONE
+	_examine_idx = -1
+	_apply_examine_highlight()
+	if _examine_panel.visible:
+		_examine_panel.hide_panel()
+	if _context_menu != null and is_instance_valid(_context_menu):
+		_context_menu.queue_free()
+		_context_menu = null
+
+func _apply_examine_highlight() -> void:
+	_turn_bar.set_examine_highlight(_examine_idx)
+	_battle_area.set_examine_highlight(_examine_idx)
+	_update_hints()
+
+# O painel/menu também fecham por conta própria (botão X, clique fora); realinha o
+# estado com o que está de fato na tela.
+func _sync_examine_state() -> void:
+	if _examine_focus == ExamineFocus.PANEL and not _examine_panel.visible:
+		_examine_focus = ExamineFocus.BAR if _examine_via_bar else ExamineFocus.NONE
+	elif _examine_focus == ExamineFocus.MENU and (_context_menu == null or not is_instance_valid(_context_menu)):
+		_examine_focus = ExamineFocus.BAR
+	if _examine_focus == ExamineFocus.NONE and _examine_idx != -1:
+		_examine_idx = -1
+		_apply_examine_highlight()
+
+# Anda na ordem de turnos; combatentes mortos não são selecionáveis e a ordem pode mudar
+# entre um passo e outro, então a seleção é sempre saneada pelo estado.
+func _examine_move(delta: int) -> void:
+	var idx: int = _state.examine_step(_examine_idx, delta)
+	if idx < 0:
+		_exit_examine()
+		return
+	_examine_idx = idx
+	_apply_examine_highlight()
+	if _examine_focus == ExamineFocus.PANEL:
+		_examine_panel.show_for(_state, _examine_idx)
+
+func _handle_examine_key(event: InputEventKey) -> void:
+	get_viewport().set_input_as_handled()
+	if _state.examine_step(_examine_idx, 0) < 0:
+		_exit_examine()
+		return
+	_examine_idx = _state.examine_step(_examine_idx, 0)
+	match _examine_focus:
+		ExamineFocus.BAR:
+			match event.keycode:
+				KEY_LEFT, KEY_A:
+					_examine_move(-1)
+				KEY_RIGHT, KEY_D:
+					_examine_move(1)
+				KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+					_open_examine_menu()
+				KEY_ESCAPE:
+					_exit_examine()
+		ExamineFocus.MENU:
+			match event.keycode:
+				KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+					_context_menu.confirm()
+				KEY_ESCAPE:
+					_context_menu.queue_free()
+					_context_menu = null
+					_examine_focus = ExamineFocus.BAR
+		ExamineFocus.PANEL:
+			match event.keycode:
+				KEY_LEFT, KEY_A:
+					_examine_move(-1)
+				KEY_RIGHT, KEY_D:
+					_examine_move(1)
+				KEY_ESCAPE:
+					_examine_panel.hide_panel()
+					_examine_focus = ExamineFocus.BAR if _examine_via_bar else ExamineFocus.NONE
+					if _examine_focus == ExamineFocus.NONE:
+						_exit_examine()
+
+func _open_examine_menu() -> void:
+	var r: Rect2 = _turn_bar.get_slot_global_rect(_examine_idx)
+	_open_context_menu(Vector2(r.position.x, r.end.y + 4.0), _examine_idx)
+	_examine_focus = ExamineFocus.MENU
+
+# ======================================================
 # INPUT — PLAYER TURN
 # ======================================================
 func _handle_player_turn(event: InputEventKey) -> void:
+	# O cursor da HUD percorre as células VISÍVEIS do grid (ActionPanel); Q/E (LB/RB)
+	# trocam o filtro do grid, que é a "aba" da HUD atual.
 	match event.keycode:
-		KEY_UP, KEY_W, KEY_Q:    _state.move_tab(-1)
-		KEY_DOWN, KEY_S, KEY_E:  _state.move_tab(1)
-		KEY_LEFT, KEY_A:     _state.move_cursor_tab(-1)
-		KEY_RIGHT, KEY_D:    _state.move_cursor_tab(1)
+		KEY_UP, KEY_W:       _action_panel.nav_move(Vector2i(0, -1))
+		KEY_DOWN, KEY_S:     _action_panel.nav_move(Vector2i(0, 1))
+		KEY_LEFT, KEY_A:     _action_panel.nav_move(Vector2i(-1, 0))
+		KEY_RIGHT, KEY_D:    _action_panel.nav_move(Vector2i(1, 0))
+		KEY_Q:               _action_panel.cycle_filter(-1)
+		KEY_E:               _action_panel.cycle_filter(1)
 		KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6:
-			_state.cursor_position = event.keycode - KEY_1
+			# O número é o do canto da célula, o mesmo que o jogador vê no grid.
+			if _action_panel.nav_select_by_number(event.keycode - KEY_1 + 1):
+				_execute_current_item()
+			get_viewport().set_input_as_handled()
+			return
+		KEY_ENTER, KEY_KP_ENTER:
 			_execute_current_item()
 			get_viewport().set_input_as_handled()
 			return
-		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-			_execute_current_item()
+		KEY_SPACE:
+			# BG3: Space encerra o turno do herói ativo e, num herói que já encerrou, cancela o fim de turno.
+			_end_or_cancel_turn()
 			get_viewport().set_input_as_handled()
 			return
 		KEY_ESCAPE:
@@ -398,12 +613,12 @@ func _handle_player_turn(event: InputEventKey) -> void:
 # ======================================================
 func _handle_move_mode(event: InputEventKey) -> void:
 	match event.keycode:
-		KEY_UP, KEY_W:    _state.move_cursor_grid(Vector2i( 0, -1))
-		KEY_DOWN, KEY_S:  _state.move_cursor_grid(Vector2i( 0,  1))
-		KEY_LEFT, KEY_A:  _state.move_cursor_grid(Vector2i(-1,  0))
-		KEY_RIGHT, KEY_D: _state.move_cursor_grid(Vector2i( 1,  0))
+		KEY_UP, KEY_W:    _step_cursor(Vector2i( 0, -1)); return
+		KEY_DOWN, KEY_S:  _step_cursor(Vector2i( 0,  1)); return
+		KEY_LEFT, KEY_A:  _step_cursor(Vector2i(-1,  0)); return
+		KEY_RIGHT, KEY_D: _step_cursor(Vector2i( 1,  0)); return
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-			_execute_confirm_move()
+			_confirm_cursor()
 			return
 		KEY_ESCAPE: _state.cancel_move()
 	_refresh_ui()
@@ -411,35 +626,52 @@ func _handle_move_mode(event: InputEventKey) -> void:
 # ======================================================
 # INPUT — ATTACK MODE
 # ======================================================
+# Em TODOS os modos de mira (área, alvo único, aliado, si mesmo, Pulo) as setas/D-pad
+# andam de quadrado em quadrado; a validade só é cobrada ao confirmar.
 func _handle_attack_mode(event: InputEventKey) -> void:
-	if _state.attack_tile_mode:
-		# Mira de AoE em ponto: setas movem o cursor de tile livre no alcance.
-		match event.keycode:
-			KEY_UP, KEY_W:    _state.move_attack_tile_cursor(Vector2i( 0, -1))
-			KEY_DOWN, KEY_S:  _state.move_attack_tile_cursor(Vector2i( 0,  1))
-			KEY_LEFT, KEY_A:  _state.move_attack_tile_cursor(Vector2i(-1,  0))
-			KEY_RIGHT, KEY_D: _state.move_attack_tile_cursor(Vector2i( 1,  0))
-			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-				_execute_confirm_attack()
-				return
-			KEY_ESCAPE:
-				_state.cancel_attack()
-				_pending_attack_action = null
-		_refresh_ui()
-		_update_attack_outlines()
-		return
 	match event.keycode:
-		KEY_LEFT, KEY_UP, KEY_A, KEY_W:    _state.cycle_attack_target(-1)
-		KEY_RIGHT, KEY_DOWN, KEY_D, KEY_S: _state.cycle_attack_target(1)
+		KEY_UP, KEY_W:    _step_cursor(Vector2i( 0, -1)); return
+		KEY_DOWN, KEY_S:  _step_cursor(Vector2i( 0,  1)); return
+		KEY_LEFT, KEY_A:  _step_cursor(Vector2i(-1,  0)); return
+		KEY_RIGHT, KEY_D: _step_cursor(Vector2i( 1,  0)); return
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-			_execute_confirm_attack()
+			_confirm_cursor()
 			return
 		KEY_ESCAPE:
 			_state.cancel_attack()
 			_pending_attack_action = null
 	_refresh_ui()
-	_update_attack_outlines()
 
+# ======================================================
+# CURSOR DE QUADRADO (mouse, analógico, D-pad e setas dividem o mesmo cursor)
+# ======================================================
+func _step_cursor(delta: Vector2i) -> void:
+	_state.step_cursor(delta)
+	_battle_area.snap_pointer_to_tile(_state.cursor_tile)
+	_refresh_ui()
+
+# Ao entrar em MOVE/ATTACK o ponteiro vai para o cursor inicial do estado.
+func _sync_cursor_on_enter() -> void:
+	if _state.current_state == BattleState.State.MOVE_MODE \
+			or _state.current_state == BattleState.State.ATTACK_MODE:
+		_battle_area.snap_pointer_to_tile(_state.cursor_tile)
+
+# Confirmar no cursor (Enter/A ou clique): só executa em quadrado válido. Inválido:
+# mostra o motivo no quadrado, não executa nada e não consome recurso.
+func _confirm_cursor() -> void:
+	if not _state.apply_cursor_selection():
+		var fb: Dictionary = _state.get_cursor_feedback()
+		if fb["reason"] != "":
+			_battle_area.show_text_floater(_state.cursor_tile, fb["reason"], FloaterManager.COLOR_MISS, 16, false)
+		_refresh_ui()
+		return
+	if _state.current_state == BattleState.State.MOVE_MODE:
+		_execute_confirm_move()
+	else:
+		_execute_confirm_attack()
+
+# Barra Confirmar/Voltar: ←/→ movem o foco (o anel branco mostra qual), Enter/A aciona
+# exatamente o botão focado e Esc/B volta.
 func _handle_action_bar(event: InputEventKey) -> void:
 	match event.keycode:
 		KEY_ESCAPE:
@@ -447,25 +679,24 @@ func _handle_action_bar(event: InputEventKey) -> void:
 		KEY_LEFT, KEY_A:
 			if _action_panel._confirm_btn.visible:
 				_action_panel._confirm_btn.grab_focus()
-			_action_panel._update_button_focus()
 		KEY_RIGHT, KEY_D:
 			_action_panel._back_btn.grab_focus()
-			_action_panel._update_button_focus()
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-			if _action_panel._confirm_btn.has_focus():
-				_action_panel._on_confirm_action()
+			if _action_panel._back_btn.has_focus() or not _action_panel._confirm_btn.visible:
+				_action_panel._on_cancel_action()
 			else:
-				if _action_panel._confirm_btn.visible:
-					_action_panel._on_confirm_action()
-				else:
-					_action_panel._on_cancel_action()
+				_action_panel._on_confirm_action()
+		_:
+			return
+	get_viewport().set_input_as_handled()   # a GUI não pode acionar o botão em dobro
 
 # ======================================================
 # EXECUTE — CURRENT ITEM
 # ======================================================
 func _execute_current_item() -> void:
-	var items: Array = _state.get_active_tab_items()
-	var item = items[_state.cursor_position] if _state.cursor_position < items.size() else null
+	_nav_tip_active = false
+	_action_tooltip.hide_tooltip()
+	var item = _action_panel.nav_selected()
 	if item == null or not _state.is_item_available(item):
 		_refresh_ui()
 		return
@@ -494,20 +725,19 @@ func _begin_item(item) -> void:
 				else:
 					desc = action.label
 				_action_panel.show_action_bar(action.label, desc, true)
+				_update_hints()
 				_pending_end_turn_action = action
 	elif item is Dictionary:
-		var desc := ""
-		if item.has("heal"):
-			desc = "Restaura %d HP" % item["heal"]
-		elif item.has("spell_slot_restore"):
-			desc = "Restaura 1 slot de %dº nível" % item["spell_slot_restore"]
+		var desc := ActionTooltipPanel.item_description(item)
 		_action_panel.show_action_bar(item.get("label", "Item"), desc, true)
+		_update_hints()
 		_pending_item = item
 
 func _execute_action(action: ActionData) -> void:
 	match action.action_type:
 		ActionData.Type.MOVE:
 			_state.enter_move_mode()
+			_sync_cursor_on_enter()
 			_refresh_ui()
 
 		ActionData.Type.ATTACK:
@@ -519,7 +749,7 @@ func _execute_action(action: ActionData) -> void:
 			_state.enter_attack_mode(
 				action.attack_range, action.targets_allies,
 				action.proj_color, action.self_target,
-				action.aoe_radius, action.bonus_action)
+				action.bonus_action)
 			# Ranged sem linha de visão até nenhum alvo: avisa e volta ao neutro.
 			if action.attack_range > 1 and _state.current_state == BattleState.State.ATTACK_MODE \
 					and not _state.attack_tile_mode and not action.self_target \
@@ -527,6 +757,7 @@ func _execute_action(action: ActionData) -> void:
 				_state.cancel_attack()
 				_pending_attack_action = null
 				_state._log("Sem linha de visão até um alvo — reposicione para abrir o ângulo.", "miss")
+			_sync_cursor_on_enter()
 			_refresh_ui()
 
 		ActionData.Type.END_TURN:
@@ -545,40 +776,31 @@ func _execute_end_turn_action(item: ActionData) -> void:
 	# Esconder (Hide): gasta a Ação principal, aplica Oculto, NÃO encerra o turno.
 	if item is AcaoEsconder:
 		_state.resolve_hide(_state.active_index)
-		_state.has_attacked = true
+		_state.spend_action_cost(item)
 		_refresh_ui()
 		return
 
 	# Mergulhar (Dip): gasta a Ação Bônus, reveste a arma, NÃO encerra o turno.
 	if item is AcaoDip:
 		_state.resolve_dip(_state.active_index)
-		_state.has_used_bonus_action = true
+		_state.spend_action_cost(item)
 		_refresh_ui()
 		return
 
+	# Passo do Vento e Segundo Vento (BG3): Ação Bônus, NÃO encerram o turno.
 	if item is SkillPassoVento:
-		if pidx >= 0:
-			var p: Dictionary = BattleState.PLAYERS[pidx]
-			if p.get("ki", 0) >= item.ki_cost:
-				p["ki"] -= item.ki_cost
-				_state.refill_move_points()
-				_state._log("Monge usa Passo do Vento!", "status")
-			else:
-				_state._log("Ki insuficiente!", "status")
+		_state.use_step_of_the_wind(item)
+		_refresh_ui()
+		return
+	if item is SkillSegundoVento:
+		_state.use_second_wind(item)
 		_refresh_ui()
 		return
 
 	if item is AcaoEsperar:
 		if pidx >= 0 and BattleState.PLAYERS[pidx]["class"] == "Rogue":
 			_state.apply_furtivo_status(pidx)
-	elif item is SkillSegundoVento:
-		if pidx >= 0 and item.pp > 0:
-			item.pp -= 1
-			var p: Dictionary = BattleState.PLAYERS[pidx]
-			p["hp"] = mini(p["hp"] + 15, p["max_hp"])
-			_state._log("%s usa Segundo Vento! +15 HP" % BattleState.PLAYERS[pidx]["name"], "status")
-	_state.advance_turn()
-	_after_advance()
+	_end_active_turn()
 
 # ======================================================
 # REACTIONS — sequenciador de popups (estilo BG3)
@@ -697,10 +919,7 @@ func _execute_reaction_entry(entry: Dictionary, done: Callable) -> void:
 		"deflect_return_fire":
 			var monk_idx: int = entry["reactor_idx"]
 			var tgt: int      = entry.get("target_idx", -1)
-			var mpidx: int    = _state._player_index_by_name(BattleState.TURN_QUEUE[monk_idx]["name"])
-			if tgt >= 0 and mpidx >= 0 and BattleState.PLAYERS[mpidx].get("ki", 0) >= 1 \
-					and not _state.dead_indices.has(tgt):
-				BattleState.PLAYERS[mpidx]["ki"] -= 1
+			if tgt >= 0 and not _state.dead_indices.has(tgt) and _state.spend_ki(monk_idx, 1):
 				_state.apply_opportunity_attack(monk_idx, tgt)
 				_animating = true
 				var rpos: Vector2i = _state.combatant_positions[tgt]
@@ -754,17 +973,31 @@ func _execute_confirm_move() -> void:
 			_state.apply_surface_on_enter(mover_idx, step_pos)
 		_flush_surface_floaters()
 		# Ataque de Oportunidade: inimigos adjacentes reagem ao jogador que saiu.
-		_enqueue_opportunity_attacks(mover_idx, old_pos, final_pos)
+		_enqueue_opportunity_attacks(mover_idx, old_pos, final_pos, move_path)
 		_process_next_reaction(func() -> void:
 			if _check_battle_end():
+				return
+			if _end_turn_if_forced():
 				return
 			_refresh_ui()
 		)
 	)
 
-# Monta entradas de OA na fila para todos os reatores válidos contra mover_idx.
-func _enqueue_opportunity_attacks(mover_idx: int, old_pos: Vector2i, new_pos: Vector2i) -> void:
-	var reactors: Array[int] = _state.check_opportunity_attacks(mover_idx, old_pos, new_pos)
+# Cair Prone no próprio turno (superfície de Gelo) encerra o turno na hora (bg3.wiki/wiki/Prone).
+func _end_turn_if_forced() -> bool:
+	if not _state.turn_forced_end:
+		return false
+	_state.turn_forced_end = false
+	_end_active_turn()   # herói: só o turno DELE acaba; inimigo: avança
+	return true
+
+# Monta entradas de OA na fila para todos os reatores válidos contra mover_idx. Com `path`
+# (movimento a pé) a checagem é PASSO A PASSO; sem ele (Pulo), é um salto de old_pos a new_pos.
+func _enqueue_opportunity_attacks(mover_idx: int, old_pos: Vector2i, new_pos: Vector2i, path: Array[Vector2i] = []) -> void:
+	# UMA regra para prévia e execução: BattleState.check_opportunity_attacks_along. O Pulo é um passo
+	# único até `new_pos`; a prévia (BattleArea) faz exatamente a mesma chamada.
+	var steps: Array[Vector2i] = path if not path.is_empty() else ([new_pos] as Array[Vector2i])
+	var reactors: Array[int] = _state.check_opportunity_attacks_along(mover_idx, old_pos, steps)
 	for r in reactors:
 		_pending_reaction_queue.append({
 			"trigger_type": "OA",
@@ -786,7 +1019,7 @@ func _enqueue_opportunity_attacks(mover_idx: int, old_pos: Vector2i, new_pos: Ve
 func _portrait_of(combatant_idx: int) -> Texture2D:
 	if not BattleState.TURN_QUEUE[combatant_idx]["is_player"]:
 		return null
-	var pidx: int = _state._player_index_by_name(BattleState.TURN_QUEUE[combatant_idx]["name"])
+	var pidx: int = _state.player_index_of(combatant_idx)
 	if pidx < 0:
 		return null
 	return BattleState.PLAYERS[pidx].get("portrait", null)
@@ -803,7 +1036,7 @@ func _execute_confirm_attack() -> void:
 	var has_target: bool    = tile_mode or not _state.attack_target_indices.is_empty()
 	var is_self: bool       = (not tile_mode) and has_target and target_pos == _state.combatant_positions[attacker_idx]
 	var is_ranged: bool     = _state.current_attack_range > 1 and not is_self
-	var aoe_radius: int     = _state.current_aoe_radius
+	var has_area: bool      = _state.current_has_area()
 	var hit_count: int      = _pending_attack_action.hit_count if _pending_attack_action != null else 1
 	var action: ActionData  = _pending_attack_action
 
@@ -856,6 +1089,15 @@ func _execute_confirm_attack() -> void:
 			_refresh_ui()
 		return
 
+	# Arremessar Poção: a nuvem cura quem estiver na área — não passa pelo _apply_attack.
+	if action is AcaoArremessarPocao:
+		_state.resolve_potion_throw(target_pos)
+		_state.finalize_attack()
+		_pending_attack_action = null
+		_flush_surface_floaters()
+		_refresh_ui()
+		return
+
 	# Arremessar (Throw): efeito de item em área no tile — não passa pelo _apply_attack.
 	if action is AcaoArremessar:
 		_state.resolve_throw(target_pos, action)
@@ -875,7 +1117,11 @@ func _execute_confirm_attack() -> void:
 	_animating = true
 
 	if tile_mode or hit_count <= 1:
+		# Janela de reação: o golpe fica pendente até a fila de reações (Smite
+		# entra como componente do mesmo golpe) e só então é aplicado.
+		_state.hold_hits_for_reactions = true
 		_state.confirm_attack()
+		_state.hold_hits_for_reactions = false
 		var callback := func() -> void:
 			_animating = false
 			_pending_attack_action = null
@@ -884,6 +1130,7 @@ func _execute_confirm_attack() -> void:
 			if target_idx >= 0:
 				_enqueue_offensive_reactions(attacker_idx, is_ranged)
 			_process_next_reaction(func() -> void:
+				_state.commit_pending_hit()
 				_show_floater_if_needed()
 				_flush_surface_floaters()  # floaters por alvo na detonação em tile
 				_process_pending_deaths()
@@ -891,9 +1138,9 @@ func _execute_confirm_attack() -> void:
 					return
 				_refresh_ui()
 			)
-		_play_attack_animation(attacker_idx, target_pos, action, aoe_radius, is_ranged, is_self, callback)
+		_play_attack_animation(attacker_idx, target_pos, action, has_area, is_ranged, is_self, callback)
 	else:
-		_execute_multi_hit(attacker_idx, target_pos, target_idx, action, aoe_radius, is_ranged, is_self, hit_count)
+		_execute_multi_hit(attacker_idx, target_pos, target_idx, action, has_area, is_ranged, is_self, hit_count)
 
 # Enfileira reações ofensivas do atacante após acertar um ataque corpo-a-corpo.
 func _enqueue_offensive_reactions(attacker_idx: int, is_ranged: bool) -> void:
@@ -903,7 +1150,7 @@ func _enqueue_offensive_reactions(attacker_idx: int, is_ranged: bool) -> void:
 		return
 	if not BattleState.TURN_QUEUE[attacker_idx]["is_player"]:
 		return
-	var pidx: int = _state._player_index_by_name(BattleState.TURN_QUEUE[attacker_idx]["name"])
+	var pidx: int = _state.player_index_of(attacker_idx)
 	if pidx < 0:
 		return
 	var t_idx: int = _state.last_attack_info.get("target_idx", -1)
@@ -918,13 +1165,7 @@ func _enqueue_offensive_reactions(attacker_idx: int, is_ranged: bool) -> void:
 	var portrait = BattleState.PLAYERS[pidx].get("portrait", null)
 	if pclass == "Paladin":
 		# Divine Smite NÃO consome a reação (BG3) — só precisa de um spell slot.
-		var slots: Array = BattleState.PLAYERS[pidx].get("spell_slots", [])
-		var has_slot := false
-		for s in slots:
-			if s > 0:
-				has_slot = true
-				break
-		if has_slot:
+		if _state.has_slot_at_or_above(pidx, 1):
 			_pending_reaction_queue.append({
 				"trigger_type": "divine_smite",
 				"reactor_idx": attacker_idx,
@@ -954,19 +1195,15 @@ func _enqueue_offensive_reactions(attacker_idx: int, is_ranged: bool) -> void:
 ## Gasta os recursos pendentes do ataque (slot de magia e/ou Ki). Chamado apenas
 ## ao confirmar — cancelar a seleção de alvo zera os pendentes sem gastar.
 func _consume_attack_resources() -> void:
-	if _pending_attack_slot_level > 0:
-		_state.consume_spell_slot(_pending_attack_slot_level)
-		_pending_attack_slot_level = 0
-	if _pending_attack_ki_cost > 0:
-		var pidx := _state.get_active_player_index()
-		if pidx >= 0:
-			BattleState.PLAYERS[pidx]["ki"] = maxi(0, int(BattleState.PLAYERS[pidx].get("ki", 0)) - _pending_attack_ki_cost)
-		_pending_attack_ki_cost = 0
+	if _pending_attack_action != null and (_pending_attack_slot_level > 0 or _pending_attack_ki_cost > 0):
+		_state.spend_action_cost(_pending_attack_action)
+	_pending_attack_slot_level = 0
+	_pending_attack_ki_cost = 0
 
 ## Despacha a animação de ataque correta (AoE / projétil / corpo-a-corpo) e
 ## dispara `cb` ao final.
-func _play_attack_animation(attacker_idx: int, target_pos: Vector2i, action: ActionData, aoe_radius: int, is_ranged: bool, is_self: bool, cb: Callable) -> void:
-	if aoe_radius > 0:
+func _play_attack_animation(attacker_idx: int, target_pos: Vector2i, action: ActionData, has_area: bool, is_ranged: bool, is_self: bool, cb: Callable) -> void:
+	if has_area:
 		_battle_area.animate_aoe_attack(attacker_idx, target_pos, action, cb)
 	elif is_ranged or is_self:
 		var is_crit: bool = _state.last_attack_info.get("is_crit", false)
@@ -978,7 +1215,7 @@ func _play_attack_animation(attacker_idx: int, target_pos: Vector2i, action: Act
 ## Flurry of Blows e afins: aplica e anima `hit_count` golpes contra o mesmo
 ## alvo em sequência (estilo BG3), cada um com seu próprio roll de ataque, dano
 ## e floater. As flags de turno só são finalizadas após o último golpe.
-func _execute_multi_hit(attacker_idx: int, target_pos: Vector2i, target_idx: int, action: ActionData, aoe_radius: int, is_ranged: bool, is_self: bool, hit_count: int) -> void:
+func _execute_multi_hit(attacker_idx: int, target_pos: Vector2i, target_idx: int, action: ActionData, has_area: bool, is_ranged: bool, is_self: bool, hit_count: int) -> void:
 	for i in range(hit_count):
 		# Interrompe se o alvo morreu num golpe anterior.
 		if _state.dead_indices.has(target_idx):
@@ -991,7 +1228,7 @@ func _execute_multi_hit(attacker_idx: int, target_pos: Vector2i, target_idx: int
 			_show_floater_if_needed()
 			_process_pending_deaths()
 			done[0] = true
-		_play_attack_animation(attacker_idx, target_pos, action, aoe_radius, is_ranged, is_self, cb)
+		_play_attack_animation(attacker_idx, target_pos, action, has_area, is_ranged, is_self, cb)
 		while not done[0]:
 			await get_tree().process_frame
 		if i < hit_count - 1:
@@ -1019,11 +1256,7 @@ func _after_advance() -> void:
 	# Rede de seguranca: a troca de turno limpa qualquer acao pendente, para
 	# que o novo turno comece num estado neutro (clicar no personagem volta a
 	# entrar no modo de movimento).
-	_pending_attack_action = null
-	_pending_end_turn_action = null
-	_pending_item = {}
-	_pending_attack_slot_level = 0
-	_pending_attack_ki_cost = 0
+	_clear_pending_actions()
 
 	# Verificação de segurança para o índice
 	if _state.active_index < 0 or _state.active_index >= BattleState.TURN_QUEUE.size():
@@ -1082,19 +1315,12 @@ func _after_advance() -> void:
 	else:
 		_animating = true
 		if _turn_transition and is_inside_tree():
-			_turn_transition.show_turn("Turno Herói", combatant_name, func() -> void:
+			# Turno compartilhado: o subtítulo lista o grupo (a Fúria do Bárbaro agora entra no início
+			# do turno de cada membro, em BattleState._begin_member).
+			_turn_transition.show_turn("Turno Herói", _turn_title(combatant_name), func() -> void:
 				_animating = false
 				if not is_inside_tree():
 					return
-				var pidx: int = _state.get_active_player_index()
-				if pidx >= 0 and pidx < BattleState.PLAYERS.size():
-					if BattleState.PLAYERS[pidx]["class"] == "Barbarian":
-						if not _state.has_fury(pidx):
-							var p: Dictionary = BattleState.PLAYERS[pidx]
-							if float(p["hp"]) / float(p["max_hp"]) < 0.5:
-								_state.apply_fury_status(pidx)
-						else:
-							_state.fury_extra_attack = true
 				_refresh_ui()
 				# Floaters de dano de superfície de início de turno (ex.: Mago na nuvem).
 				_flush_surface_floaters()
@@ -1103,6 +1329,31 @@ func _after_advance() -> void:
 			_animating = false
 			_refresh_ui()
 			_flush_surface_floaters()
+
+# Turno compartilhado (BG3): troca livre entre os heróis do bloco, só com o estado "neutro"
+# (nenhuma ação, mira ou confirmação pendente) e fora de animação, reação, pausa e exame.
+func _can_switch_hero() -> bool:
+	return not _animating and not _reaction_pending and not _pause_menu.visible \
+		and _examine_focus == ExamineFocus.NONE and _state.battle_result.is_empty() \
+		and _is_neutral_player_state() and _state.switchable_members().size() > 1
+
+func _switch_hero_to_next() -> void:
+	if _can_switch_hero() and _state.cycle_active_member(1):
+		_refresh_ui()
+
+func _switch_hero_to(queue_idx: int) -> void:
+	if _can_switch_hero() and _state.switch_active_member(queue_idx):
+		_refresh_ui()
+
+# Subtítulo do turno dos heróis: o nome do ativo, ou o grupo quando o turno é compartilhado.
+func _turn_title(active_name: String) -> String:
+	var block: Array[int] = _state.get_turn_block()
+	if block.size() < 2:
+		return active_name
+	var names: Array[String] = []
+	for m in block:
+		names.append(str(BattleState.TURN_QUEUE[m]["name"]))
+	return ", ".join(names) if block.size() <= 3 else "%s e mais %d" % [active_name, block.size() - 1]
 
 # ======================================================
 # ENEMY TURN
@@ -1127,7 +1378,7 @@ func _do_enemy_turn() -> void:
 			_state.apply_surface_on_enter(enemy_idx, step_pos)
 		_flush_surface_floaters()
 		# Ataque de Oportunidade: jogadores adjacentes reagem ao inimigo que saiu.
-		_enqueue_opportunity_attacks(enemy_idx, enemy_old_pos, final_pos)
+		_enqueue_opportunity_attacks(enemy_idx, enemy_old_pos, final_pos, path)
 		_process_next_reaction(func() -> void:
 			if _check_battle_end():
 				return
@@ -1136,13 +1387,19 @@ func _do_enemy_turn() -> void:
 				_state.advance_turn()
 				_after_advance()
 				return
+			# Caiu Prone no próprio turno (Gelo): o turno acaba sem atacar (BG3).
+			if _end_turn_if_forced():
+				return
 			_enemy_do_attack()
 		)
 	)
 
 func _enemy_do_attack() -> void:
 	var attacker_idx: int    = _state.active_index
+	# Janela de reação: o golpe fica pendente até Esquiva/Defletir decidirem.
+	_state.hold_hits_for_reactions = true
 	var info: Dictionary     = _state.apply_enemy_attack()
+	_state.hold_hits_for_reactions = false
 	var target_pos: Vector2i = info.get("target", Vector2i(-1, -1))
 
 	if target_pos.x < 0:
@@ -1155,6 +1412,7 @@ func _enemy_do_attack() -> void:
 	# resolvidas ANTES da animação, para que o floater mostre o dano já reduzido.
 	_enqueue_defensive_reactions(attacker_idx, info)
 	_process_next_reaction(func() -> void:
+		_state.commit_pending_hit()   # dano aplicado uma vez, já reduzido pelas reações
 		_animating = true
 		var is_crit: bool = _state.last_attack_info.get("is_crit", false)
 		var callback := func() -> void:
@@ -1197,7 +1455,7 @@ func _enqueue_defensive_reactions(attacker_idx: int, info: Dictionary) -> void:
 		return
 	if not _state.has_reaction_available(target_idx):
 		return
-	var pidx: int = _state._player_index_by_name(BattleState.TURN_QUEUE[target_idx]["name"])
+	var pidx: int = _state.player_index_of(target_idx)
 	if pidx < 0:
 		return
 	var pclass: String = BattleState.PLAYERS[pidx].get("class", "")
@@ -1253,24 +1511,39 @@ var _los_overlay_on: bool = false
 func _process(_dt: float) -> void:
 	if _state == null:
 		return
-	var want: bool = Input.is_key_pressed(KEY_SHIFT) and _is_neutral_player_state() and not _animating
+	_sync_examine_state()
+	_update_nav_tooltip()
+	_hint_bar.visible = not _pause_menu.visible and not _reaction_pending and _state.battle_result.is_empty()
+	_action_panel.nav_enabled = not _pause_menu.visible and not _reaction_pending and _examine_focus == ExamineFocus.NONE
+	InputDevice.stick_drives_cursor = _stick_drives_cursor()
+	var want: bool = InputDevice.is_los_held() and _is_neutral_player_state() and not _animating
 	if want != _los_overlay_on:
 		_los_overlay_on = want
 		_battle_area.set_los_overlay(want, _state.get_enemy_vision_tiles() if want else {})
 
-# Em ATTACK_MODE com mira de AoE em tile, o movimento do mouse arrasta o centro
-# do AoE (clampado ao alcance). Setas e clique continuam funcionando.
+func _exit_tree() -> void:
+	InputDevice.stick_drives_cursor = false
+
+# O analógico esquerdo move o cursor livre do grid só enquanto há um modo de grid ativo
+# e nada mais (animação, reação, pausa, exame, barra de confirmação) está no controle.
+func _stick_drives_cursor() -> bool:
+	return (_state.current_state == BattleState.State.MOVE_MODE \
+			or _state.current_state == BattleState.State.ATTACK_MODE) \
+		and not _animating and not _reaction_pending and not _pause_menu.visible \
+		and not _action_panel._action_bar_active and _examine_focus == ExamineFocus.NONE \
+		and _state.battle_result.is_empty()
+
+# O hover (mouse ou analógico) move o cursor de quadrado de MOVE/ATTACK: o quadrado sob
+# o ponteiro é o selecionado, qualquer um, alcançável ou não.
 func _on_tile_hovered(grid_pos: Vector2i) -> void:
-	if _state == null or _state.current_state != BattleState.State.ATTACK_MODE:
+	if _state == null:
 		return
-	# Pular: o arco segue o mouse livremente (sem clamp ao alcance de mira).
-	if _state._current_action is AcaoPular:
-		_battle_area.queue_redraw()
+	if _state.current_state != BattleState.State.MOVE_MODE \
+			and _state.current_state != BattleState.State.ATTACK_MODE:
 		return
-	if not _state.attack_tile_mode:
-		return
-	if _state.set_attack_tile_cursor_clamped(grid_pos):
-		_battle_area.queue_redraw()
+	_state.set_cursor_tile(grid_pos)
+	_update_attack_outlines()
+	_battle_area.queue_redraw()
 
 func _on_tile_clicked(grid_pos: Vector2i) -> void:
 	if _animating:
@@ -1283,36 +1556,21 @@ func _on_tile_clicked(grid_pos: Vector2i) -> void:
 			# passar pelo menu. Como o sprite isometrico se desenha acima do
 			# tile, o clique costuma cair num tile vizinho; por isso aceitamos
 			# a vizinhanca imediata (Chebyshev <= 1) do tile do personagem.
+			# Turno compartilhado: clicar em OUTRO herói do bloco passa o controle para ele.
+			for member in _state.switchable_members():
+				if member != _state.active_index and _state.combatant_positions[member] == grid_pos:
+					_switch_hero_to(member)
+					return
 			if _is_neutral_player_state() and _state.move_points_remaining > 0:
 				var self_pos: Vector2i = _state.combatant_positions[_state.active_index]
 				if absi(grid_pos.x - self_pos.x) <= 1 and absi(grid_pos.y - self_pos.y) <= 1:
 					_state.enter_move_mode()
+					_sync_cursor_on_enter()
 					_refresh_ui()
-		BattleState.State.MOVE_MODE:
-			if _state.get_reachable_tiles().has(grid_pos):
-				_state.move_cursor = grid_pos
-				_execute_confirm_move()
-		BattleState.State.ATTACK_MODE:
-			# Pular: clique num pouso válido executa; inválido só avisa, sem gastar ação.
-			if _state._current_action is AcaoPular:
-				if _state.is_valid_jump_landing(_state.active_index, grid_pos):
-					_state.attack_tile_cursor = grid_pos
-					_execute_confirm_attack()
-				else:
-					_battle_area.show_text_floater(grid_pos, "Sem pouso", FloaterManager.COLOR_MISS, 16, false)
-				return
-			# Mira de AoE em ponto: clicar em qualquer tile válido no alcance posiciona
-			# o cursor de tile e detona ali (com ou sem criatura no centro).
-			if _state.attack_tile_mode:
-				if _state.get_attack_area_tiles().has(grid_pos):
-					_state.attack_tile_cursor = grid_pos
-					_execute_confirm_attack()
-				return
-			for i in range(_state.attack_target_indices.size()):
-				if _state.combatant_positions[_state.attack_target_indices[i]] == grid_pos:
-					_state.attack_cursor_idx = i
-					_execute_confirm_attack()
-					return
+		BattleState.State.MOVE_MODE, BattleState.State.ATTACK_MODE:
+			# Clicar = selecionar o quadrado e confirmar: a mesma regra do Enter/A.
+			_state.set_cursor_tile(grid_pos)
+			_confirm_cursor()
 
 # ======================================================
 # GRID EVENTS
@@ -1329,13 +1587,41 @@ func _on_grid_action_clicked(action) -> void:
 
 # Shows the action tooltip on hover (after a short delay); hides it on mouse-out
 # (action == null) or when not the player's turn.
-func _on_action_hovered(action: ActionData) -> void:
+# `action` é ActionData (células) ou Dictionary (itens), por isso sem tipo.
+func _on_action_hovered(action) -> void:
 	if _action_tooltip == null:
 		return
+	_nav_tip_active = false   # o mouse assumiu o painel
 	if action == null or _state == null or _state.current_state != BattleState.State.PLAYER_TURN:
 		_action_tooltip.hide_tooltip()
 		return
 	_action_tooltip.show_for(action)
+
+# Seleção por teclado/controle: o mesmo painel do hover, junto ao item sob o anel.
+func _on_nav_selected(subject, anchor: Rect2) -> void:
+	if _action_tooltip == null:
+		return
+	if subject == null or not _hud_tooltip_allowed():
+		_nav_tip_active = false
+		_action_tooltip.hide_tooltip()
+		return
+	_nav_tip_active = true
+	_action_tooltip.show_for(subject, anchor)
+
+# A HUD só mostra detalhes quando é ela quem recebe os comandos.
+func _hud_tooltip_allowed() -> bool:
+	return _state != null and _state.current_state == BattleState.State.PLAYER_TURN and not _animating and not _reaction_pending and not _pause_menu.visible and _examine_focus == ExamineFocus.NONE and not _action_panel._action_bar_active and _state.battle_result.is_empty()
+
+# Esconde o painel da navegação quando a HUD deixa de receber os comandos (mover, mirar,
+# exame, pausa, reação, fim de turno). No controle, ao voltar à HUD o painel reaparece.
+func _update_nav_tooltip() -> void:
+	var allowed := _hud_tooltip_allowed()
+	if _nav_tip_active and not allowed:
+		_nav_tip_active = false
+		_action_tooltip.hide_tooltip()
+	if allowed and not _hud_tip_allowed_prev and InputDevice.is_gamepad():
+		_action_panel.announce_selection()
+	_hud_tip_allowed_prev = allowed
 
 # Element B: shows/hides the fixed top-of-screen enemy info panel as the hovered
 # attack target changes (cidx is a TURN_QUEUE index, or -1 for none).
@@ -1346,22 +1632,47 @@ func _on_attack_hover_changed(cidx: int) -> void:
 		_enemy_info_panel.hide_panel()
 		return
 	var combatant: Dictionary = BattleState.TURN_QUEUE[cidx]
-	var hp_cur: int
-	var hp_max: int
-	if combatant.get("is_player", false):
-		var pidx := _state._player_index_by_name(combatant["name"])
-		hp_cur = BattleState.PLAYERS[pidx].get("hp", 0) if pidx >= 0 else 0
-		hp_max = BattleState.PLAYERS[pidx].get("max_hp", 1) if pidx >= 0 else 1
-	else:
-		hp_cur = int(_state.enemy_hp.get(combatant.get("name", ""), 0))
-		hp_max = _state.get_enemy_max_hp(cidx)
-	_enemy_info_panel.show_for(combatant, hp_cur, hp_max)
+	_enemy_info_panel.show_for(combatant, _state.get_hp(cidx), maxi(1, _state.get_max_hp(cidx)))
 
 func _on_end_turn_pressed() -> void:
 	if _animating or _state.current_state != BattleState.State.PLAYER_TURN:
 		return
-	_state.advance_turn()
-	_after_advance()
+	_end_or_cancel_turn()
+
+# Ação ou seleção pendente some quando o controle muda de herói ou de turno.
+func _clear_pending_actions() -> void:
+	_pending_attack_action = null
+	_pending_end_turn_action = null
+	_pending_item = {}
+	_pending_attack_slot_level = 0
+	_pending_attack_ki_cost = 0
+
+# Fim de turno e "cancelar fim de turno" usam o MESMO comando (BG3, bg3.wiki "Controls": Space; no
+# controle é o botão X do jogo, porque o Y daqui é Examinar): no herói que ainda age, encerra o turno
+# DELE; num herói que já encerrou (selecionado pelo retrato), cancela e ele volta a agir.
+func _end_or_cancel_turn() -> void:
+	if _state.active_ended():
+		if _state.cancel_member_end(_state.active_index):
+			_clear_pending_actions()
+			_refresh_ui()
+		return
+	_end_active_turn()
+
+# Encerra só o turno do herói ativo; o controle passa ao próximo que ainda age, e a vez só passa
+# adiante quando o último herói disponível do bloco encerra. Inimigo: avança direto.
+func _end_active_turn() -> void:
+	if not BattleState.TURN_QUEUE[_state.active_index]["is_player"]:
+		_state.advance_turn()
+		_after_advance()
+		return
+	match _state.end_member_turn():
+		BattleState.EndResult.BLOCK_DONE:
+			_state.advance_turn()
+			_after_advance()
+		BattleState.EndResult.SWITCHED:
+			_clear_pending_actions()
+			_action_panel.hide_action_bar()
+			_refresh_ui()
 
 # ======================================================
 # BATTLE END
@@ -1389,6 +1700,12 @@ func _process_pending_deaths() -> void:
 func _show_floater_if_needed() -> void:
 	if _state.last_attack_info.is_empty():
 		return
+	# Vibração: crítico causado/recebido por herói. Marca o golpe para não vibrar duas
+	# vezes se este método rodar de novo sobre o mesmo last_attack_info.
+	var rumble_kind: StringName = _state.hit_rumble_kind(_state.last_attack_info)
+	if rumble_kind != &"" and not _state.last_attack_info.get("rumbled", false):
+		_state.last_attack_info["rumbled"] = true
+		InputDevice.rumble(rumble_kind)
 	var target_idx: int = _state.last_attack_info.get("target_idx", -1)
 	var amount: int     = _state.last_attack_info.get("amount", 0)
 	if target_idx < 0 or target_idx >= _state.combatant_positions.size():
@@ -1406,18 +1723,8 @@ func _show_floater_if_needed() -> void:
 				_battle_area.show_text_floater(grid_pos, "Miss!", FloaterManager.COLOR_MISS, 16, false)
 		return
 	
-	var combatant: Dictionary = BattleState.TURN_QUEUE[target_idx]
-	if combatant["is_player"]:
-		var player_idx := _find_player_idx(combatant["name"])
-		if player_idx >= 0:
-			var player: Dictionary = BattleState.PLAYERS[player_idx]
-			_battle_area._combatant_layer.update_single_combatant_hp(target_idx, player["hp"], player["max_hp"])
-	else:
-		var cname: String = combatant["name"]
-		var hp: int = _state.enemy_hp.get(cname, 0)
-		var max_hp: int = _state.get_enemy_max_hp(target_idx)
-		_battle_area._combatant_layer.update_single_combatant_hp(target_idx, hp, max_hp)
-	
+	_battle_area._combatant_layer.update_single_combatant_hp(target_idx, _state.get_hp(target_idx), _state.get_max_hp(target_idx))
+
 	# Display estilo BG3: o floater principal mostra só o dano base da arma
 	# (dados + atributo); cada componente extra (Furtivo, Smite) aparece como um
 	# floater próprio em sequência, nunca somado num único número.
@@ -1426,7 +1733,7 @@ func _show_floater_if_needed() -> void:
 	var status_bonus_label: String = _state.last_attack_info.get("status_bonus_label", "")
 	var base_amount: int = maxi(1, amount - smite_amount - status_bonus_amount)
 
-	var dtype = _state.last_attack_info.get("damage_type", ActionData.DamageType.PHYSICAL)
+	var dtype = _state.last_attack_info.get("damage_type", ActionData.DamageType.BLUDGEONING)
 	var dtype_color := ActionData.damage_type_color(dtype) if not is_heal else Color(-1, -1, -1)
 	_battle_area.show_floater(
 		_state.combatant_positions[target_idx],
@@ -1457,25 +1764,19 @@ func _flush_surface_floaters() -> void:
 		if idx < 0 or idx >= _state.combatant_positions.size():
 			continue
 		var pos: Vector2i = _state.combatant_positions[idx]
-		_battle_area.show_hit_flash(idx)
+		var is_heal: bool = hit.get("is_heal", false)
+		if not is_heal:
+			_battle_area.show_hit_flash(idx)
 		# Número de dano em roxo vivo (tema da nuvem) + rótulo do tipo, no mesmo
 		# estilo dos floaters de bônus (Furtivo/Smite), para ficar bem visível. A
 		# detonação de AoE em tile pode sobrescrever com a cor do tipo de dano.
 		var surf_color: Color = hit.get("color", Color(0.78, 0.45, 1.0))
-		_battle_area.show_floater(pos, hit.get("damage", 0), false, false, surf_color)
+		_battle_area.show_floater(pos, hit.get("damage", 0), is_heal, false, surf_color)
 		var hit_label: String = hit.get("label", "")
 		if hit_label != "":
 			_battle_area.show_text_floater(pos, hit_label, surf_color, 14, false)
 		# Atualiza a barra de HP imediatamente para refletir o dano de superfície.
-		var combatant: Dictionary = BattleState.TURN_QUEUE[idx]
-		if combatant["is_player"]:
-			var pidx := _find_player_idx(combatant["name"])
-			if pidx >= 0:
-				var player: Dictionary = BattleState.PLAYERS[pidx]
-				_battle_area._combatant_layer.update_single_combatant_hp(idx, player["hp"], player["max_hp"])
-		else:
-			var hp: int = _state.enemy_hp.get(combatant["name"], 0)
-			_battle_area._combatant_layer.update_single_combatant_hp(idx, hp, _state.get_enemy_max_hp(idx))
+		_battle_area._combatant_layer.update_single_combatant_hp(idx, _state.get_hp(idx), _state.get_max_hp(idx))
 	_state.pending_surface_hits.clear()
 
 # Cancelamento manual de concentração via botão × no StatusPanel.
@@ -1518,12 +1819,6 @@ func _on_restart_requested() -> void:
 # ======================================================
 # HELPERS
 # ======================================================
-func _find_player_idx(pname: String) -> int:
-	for i in range(BattleState.PLAYERS.size()):
-		if BattleState.PLAYERS[i]["name"] == pname:
-			return i
-	return -1
-
 func _terrain_info(tile: TerrainTile) -> Array:
 	if tile.effect == TerrainTile.EffectType.TRAP_ACTIVE:
 		return ["Armadilha Ativada", "Dano e veneno ao pisar!"]
@@ -1531,7 +1826,7 @@ func _terrain_info(tile: TerrainTile) -> Array:
 		match tile.object:
 			TerrainTile.ObjectType.STATUE:   return ["Estátua",    "Obstáculo decorativo."]
 			TerrainTile.ObjectType.OBSTACLE: return ["Obstáculo",  "Bloqueia passagem."]
-			TerrainTile.ObjectType.COVER:    return ["Cobertura",  "Fornece cobertura contra ataques."]
+			TerrainTile.ObjectType.COVER:    return ["Cobertura",  "Bloqueia o movimento e a linha de visão."]
 	if tile.ground == TerrainTile.GroundType.ELEVATED:
 		return ["Elevado", "Terreno elevado. +1 alcance para ataques à distância."]
 	match tile.ground:
@@ -1550,11 +1845,12 @@ func _update_attack_outlines() -> void:
 	for i in _state.attack_target_indices:
 		available.append(i)
 	
+	# Destacado = o alvo válido sob o cursor (mouse, analógico, D-pad ou setas).
 	var selected := -1
-	if not _state.attack_target_indices.is_empty():
-		var cursor_idx: int = _state.attack_cursor_idx
-		if cursor_idx >= 0 and cursor_idx < _state.attack_target_indices.size():
-			selected = _state.attack_target_indices[cursor_idx]
+	# Em mira de cruzamento o cursor não é uma casa: não destaca criatura nenhuma.
+	var under_cursor: int = -1 if _state.attack_corner_mode else _state._combatant_at(_state.cursor_tile)
+	if under_cursor >= 0 and _state.attack_target_indices.has(under_cursor):
+		selected = under_cursor
 	
 	_battle_area.update_combatant_outlines(available, selected)
 
@@ -1566,8 +1862,8 @@ func _get_action_description(action: ActionData) -> String:
 			desc = "Cura %d-%d HP  •  Alcance %d" % [dmg_range.x, dmg_range.y, action.attack_range]
 		else:
 			desc = "Dano: %d-%d  •  Alcance: %d" % [dmg_range.x, dmg_range.y, action.attack_range]
-			if action.aoe_radius > 0:
-				desc += "  •  AoE raio %d" % action.aoe_radius
+			if action.has_area():
+				desc += "  •  " + action.area_text()
 		if action.spell_slot_level > 0:
 			desc += "  •  Slot: %dº nível" % action.spell_slot_level
 		elif action.ki_cost > 0:
@@ -1582,13 +1878,20 @@ func _get_action_description(action: ActionData) -> String:
 func _on_portrait_right_clicked(slot_index: int, global_mouse_pos: Vector2) -> void:
 	if _animating:
 		return
+	_examine_via_bar = false
+	_open_context_menu(global_mouse_pos, slot_index)
+
+func _open_context_menu(pos: Vector2, slot_index: int) -> void:
 	if _context_menu != null and is_instance_valid(_context_menu):
 		_context_menu.queue_free()
 	_context_menu = ContextMenu.new()
 	add_child(_context_menu)
 	_context_menu.examine_requested.connect(_on_examine_requested)
-	_context_menu.show_at(global_mouse_pos, slot_index)
+	_context_menu.show_at(pos, slot_index)
 
 func _on_examine_requested(slot_index: int) -> void:
 	_context_menu = null
+	_examine_idx = slot_index
+	_examine_focus = ExamineFocus.PANEL
+	_apply_examine_highlight()
 	_examine_panel.show_for(_state, slot_index)

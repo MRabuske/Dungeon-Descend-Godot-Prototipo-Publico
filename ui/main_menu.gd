@@ -33,6 +33,7 @@ func _ready() -> void:
 	_build_background()
 	_build_ui()
 	_build_version_label()
+	HintBar.attach_bottom(self, [[&"navigate", "Navegar"], [&"confirm", "Selecionar"]])
 	_build_options_panel()
 
 # ======================================================
@@ -120,7 +121,17 @@ func _build_ui() -> void:
 	_add_button(panel, "Nova Run",  _on_nova_run)
 
 	var continuar := _add_button(panel, "Continuar", _on_continuar)
-	continuar.visible = FileAccess.file_exists(DungeonState.SAVE_PATH)
+	var save_notice: String = _prepare_continue()
+	continuar.visible = DungeonState.save_status() == DungeonState.SaveStatus.VALID
+	if save_notice != "":
+		var notice := Label.new()
+		notice.text = save_notice
+		notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		notice.custom_minimum_size = Vector2(300, 0)
+		notice.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		notice.add_theme_font_size_override("font_size", 10)
+		notice.add_theme_color_override("font_color", Color(1.0, 0.75, 0.4))
+		panel.add_child(notice)
 
 	_add_button(panel, "Opcoes",  _on_opcoes)
 	_add_button(panel, "Credits", _on_credits)
@@ -130,6 +141,21 @@ func _build_ui() -> void:
 
 	panel.modulate.a = 0.0
 	create_tween().tween_property(panel, "modulate:a", 1.0, 0.5)
+
+# Decide o que fazer com um save que não carrega e devolve o aviso para o jogador ("" = nada).
+# Corrompido: vai para <nome>.corrupt.json (nunca é apagado). Mais novo ou ilegível: fica como está.
+func _prepare_continue() -> String:
+	match DungeonState.save_status():
+		DungeonState.SaveStatus.CORRUPT:
+			var kept: String = DungeonState.quarantine_corrupt_save()
+			if kept == "":
+				return "Save corrompido e nao pode ser movido."
+			return "Save corrompido, guardado como %s." % kept.get_file()
+		DungeonState.SaveStatus.NEWER:
+			return "O save e de uma versao mais nova do jogo."
+		DungeonState.SaveStatus.UNREADABLE:
+			return "Nao foi possivel ler o save."
+	return ""
 
 # ======================================================
 # BUILD — VERSION LABEL

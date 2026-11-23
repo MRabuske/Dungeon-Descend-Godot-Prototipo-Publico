@@ -11,7 +11,6 @@ func _init() -> void:
 	base_hp      = 80
 	max_hp       = 100
 	ac           = 16
-	initiative   = 8
 	speed        = 7
 	proficiency  = 3
 	strength     = 16
@@ -21,6 +20,6 @@ func _init() -> void:
 	constitution = 15
 	charisma     = 10
 	save_proficiencies = ["STR", "CON"]
-	weapon = HeroData.make_weapon("Longsword", 1, 8, ActionData.DamageAttribute.STR, false, 10)
+	weapon = HeroData.make_weapon("Longsword", 1, 8, ActionData.DamageAttribute.STR, false, 10, ActionData.DamageType.SLASHING)
 	actions = [AtqNormal.new(), AtqPesado.new(), AcaoMover.new()]
 	skills  = [SkillSegundoVento.new(), SkillAjuda.new()]

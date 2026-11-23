@@ -10,7 +10,7 @@ func _init() -> void:
 	icon              = preload("res://assets/ui/icons/skills/smite.png")
 	attack_range      = 1
 	damage_attribute  = DamageAttribute.STR
-	damage_type       = DamageType.PHYSICAL
+	damage_type       = DamageType.BLUDGEONING
 	damage_dice_count = 1
 	damage_dice_sides = 8
 	is_weapon_attack  = true   # força rolagem d20 vs AC e usa dados da arma (fallback 1d8)

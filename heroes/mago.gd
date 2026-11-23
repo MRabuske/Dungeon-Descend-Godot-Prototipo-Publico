@@ -12,7 +12,6 @@ func _init() -> void:
 	max_hp       = 100
 	caster_type  = CasterType.FULL
 	ac           = 12
-	initiative   = 5
 	speed        = 6
 	proficiency  = 3
 	strength     = 8
