@@ -30,8 +30,8 @@ signal tile_hovered(grid_pos: Vector2i)
 # Emitted while in ATTACK_MODE when the hovered valid target changes.
 # Carries the TURN_QUEUE index of the target, or -1 when none is hovered.
 signal attack_hover_changed(combatant_idx: int)
-
-const MAX_PAN := 320.0
+# Botão direito no mapa (BG3 "Cancel Action"): a cena cancela o modo de movimento ou de mira.
+signal cancel_clicked
 
 const ANIM_PROJECTILE_DUR     := 0.18
 const ANIM_AOE_PROJECTILE_DUR := 0.20
@@ -65,6 +65,7 @@ var _hovered_grid: Vector2i = Vector2i(-1, -1)
 # Cursor livre do analógico (coordenadas locais). Nunca usa warp_mouse: o warp geraria
 # evento de mouse e devolveria o jogo ao dispositivo teclado/mouse.
 var pointer_pos: Vector2 = Vector2.ZERO
+var _pointer_ready: bool = false   # o cursor livre nasce no centro da área, não no canto
 # Combatente em exame (índice de TURN_QUEUE, -1 = nenhum): borda branca no tile dele.
 var _examine_idx: int = -1
 
@@ -83,9 +84,14 @@ var _oa_warn_lbl: Label = null
 var _invalid_lbl: Label = null
 
 var _zoom: float = 1.0
-const ZOOM_MIN := 0.45
-const ZOOM_MAX := 2.50
-const ZOOM_STEP := 0.12
+const ZOOM_WHEEL_STEP := 0.12
+
+# A cena desliga isto enquanto pausa, reação ou transição têm o controle (zoom contínuo e foco).
+var camera_input_enabled: bool = true
+# Visão geral (R3): zoom e pan de antes, para o segundo toque voltar. null = fora da visão geral.
+var _overview_saved: Variant = null
+# Pan para onde o foco automático rola suavemente. null = parado.
+var _follow_pan: Variant = null
 
 var _pulse_time: float = 0.0
 var _aoe_blast: Dictionary = {}
@@ -297,6 +303,7 @@ func inject_vfx_references(cam_shake: CameraShake, scr_flash: ScreenFlash) -> vo
 
 func _process(delta: float) -> void:
 	_pulse_time += delta * 1.8
+	_process_camera(delta)
 	_process_gamepad(delta)
 	for effect in _void_effects.values():
 		effect.update(delta)
@@ -317,23 +324,57 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 # ── Controle: câmera, cursor livre e cursor por quadrado ─────────────────────
+# Zoom contínuo (analógico direito ↑/↓ ou Page Up/Down) e foco suave valem com qualquer dispositivo.
+func _process_camera(delta: float) -> void:
+	if _state == null or not camera_input_enabled:
+		return
+	# W/A/S/D movem só a câmera (BG3), contínuo e em diagonal, em qualquer estado da batalha.
+	# Não tocam no cursor nem na seleção: o hover só se atualiza quando o cursor livre se mexe.
+	var key_dir := _wasd_direction()
+	if key_dir != Vector2.ZERO:
+		_follow_pan = null
+		_pan_by(BattleCamera.key_pan_velocity(key_dir) * delta)
+		queue_redraw()
+	var zoom_axis: float = InputDevice.zoom_axis()
+	if zoom_axis != 0.0:
+		_follow_pan = null
+		_overview_saved = null
+		set_zoom(BattleCamera.zoom_step(_zoom, zoom_axis, delta))
+		return
+	if _follow_pan != null:
+		var target: Vector2 = _follow_pan
+		_pan_offset = _pan_offset.lerp(target, 1.0 - exp(-BattleCamera.FOLLOW_RATE * delta))
+		if _pan_offset.distance_to(target) < 0.5:
+			_pan_offset = target
+			_follow_pan = null
+		_update_hit_preview()
+		queue_redraw()
+
+# Direção pedida pelo WASD (W = cima da tela). Zero com campo de texto em foco ou com Ctrl/Alt/Cmd.
+func _wasd_direction() -> Vector2:
+	var focus := get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	if focus is LineEdit or focus is TextEdit:
+		return Vector2.ZERO
+	if Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT) or Input.is_key_pressed(KEY_META):
+		return Vector2.ZERO
+	return Vector2(
+		float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A)),
+		float(Input.is_key_pressed(KEY_S)) - float(Input.is_key_pressed(KEY_W)))
+
+# O cursor livre do analógico esquerdo: existe em todo o combate (a cena liga stick_drives_cursor).
+# Leva a câmera à borda; no turno neutro só olha (hover), em MOVE/ATTACK escolhe o quadrado.
 func _process_gamepad(delta: float) -> void:
-	if _state == null or not InputDevice.is_gamepad():
+	if _state == null or not InputDevice.is_gamepad() or not InputDevice.stick_drives_cursor:
 		return
-	# Analógico direito: câmera, com o mesmo clamp do arrasto do mouse.
-	var cam: Vector2 = InputDevice.camera_axis()
-	if cam != Vector2.ZERO:
-		_pan_offset = (_pan_offset - cam * BattleCamera.STICK_PAN_SPEED * delta).clamp(
-			Vector2(-MAX_PAN, -MAX_PAN), Vector2(MAX_PAN, MAX_PAN))
-	if not InputDevice.stick_drives_cursor:
-		return
-	# Analógico esquerdo: cursor livre (equivale ao mouse). Na faixa de borda a câmera rola.
+	if not _pointer_ready:
+		_pointer_ready = true
+		pointer_pos = size * 0.5
 	var axis: Vector2 = InputDevice.cursor_axis()
 	if axis != Vector2.ZERO:
+		_follow_pan = null
 		pointer_pos = (pointer_pos + axis * BattleCamera.POINTER_SPEED * delta).clamp(Vector2.ZERO, size)
 		_pan_by(BattleCamera.edge_pan_velocity(pointer_pos, size,
 			BattleCamera.EDGE_MARGIN, axis, BattleCamera.EDGE_PAN_SPEED) * delta)
-	if axis != Vector2.ZERO or cam != Vector2.ZERO:
 		var gp := _pointer_cell(pointer_pos)
 		if gp != _hovered_grid:
 			_hovered_grid = gp
@@ -346,17 +387,101 @@ func _pan_by(delta_pan: Vector2) -> void:
 	if delta_pan == Vector2.ZERO:
 		return
 	var allowed := BattleCamera.can_pan(_map_screen_rect(), size, delta_pan)
-	_pan_offset = (_pan_offset + allowed).clamp(Vector2(-MAX_PAN, -MAX_PAN), Vector2(MAX_PAN, MAX_PAN))
+	_pan_offset = _clamp_pan(_pan_offset + allowed)
+	_follow_pan = null
+	_overview_saved = null
 
-# Retângulo do mapa isométrico em coordenadas de tela (com zoom e pan aplicados).
-func _map_screen_rect() -> Rect2:
+func _clamp_pan(pan: Vector2) -> Vector2:
+	if _state == null:
+		return pan
+	return BattleCamera.clamp_pan(pan, _map_world_rect(), size, _zoom)
+
+# Retângulo do mapa isométrico em coordenadas de mundo (sem zoom nem pan).
+func _map_world_rect() -> Rect2:
 	var cols: int = _state.grid_cols
 	var rows: int = _state.grid_rows
 	var off := _get_offset()
-	var world := Rect2(off.x - rows * TILE_HALF_W, off.y,
+	return Rect2(off.x - rows * TILE_HALF_W, off.y,
 		(cols + rows) * TILE_HALF_W, (cols + rows) * TILE_HALF_H)
+
+# Retângulo do mapa isométrico em coordenadas de tela (com zoom e pan aplicados).
+func _map_screen_rect() -> Rect2:
+	var world := _map_world_rect()
 	var t: Vector2 = size * 0.5 * (1.0 - _zoom) + _pan_offset
 	return Rect2(world.position * _zoom + t, world.size * _zoom)
+
+# Zoom atual e mínimo (o que cabe o mapa inteiro nesta tela).
+func get_zoom() -> float:
+	return _zoom
+
+func get_min_zoom() -> float:
+	return BattleCamera.min_zoom(_map_world_rect().size, size)
+
+func get_pan() -> Vector2:
+	return _pan_offset
+
+# Define o zoom (limitado ao que cabe o mapa e ao máximo) mantendo o centro da tela no mesmo ponto.
+func set_zoom(new_zoom: float) -> void:
+	if _state == null:
+		return
+	var z := BattleCamera.clamp_zoom(new_zoom, _map_world_rect().size, size)
+	_pan_offset = BattleCamera.rescale_pan(_pan_offset, _zoom, z)
+	_zoom = z
+	_pan_offset = _clamp_pan(_pan_offset)
+	_update_hit_preview()
+	queue_redraw()
+
+# R3: afasta até o mapa inteiro caber; um segundo toque volta ao zoom e à posição de antes.
+func toggle_overview() -> void:
+	if _state == null:
+		return
+	_follow_pan = null
+	if _overview_saved != null:
+		var saved: Array = _overview_saved
+		_overview_saved = null
+		_zoom = float(saved[0])
+		_pan_offset = _clamp_pan(saved[1])
+	else:
+		var saved_state: Array = [_zoom, _pan_offset]
+		var world := _map_world_rect()
+		_zoom = get_min_zoom()
+		_pan_offset = _clamp_pan(BattleCamera.pan_to_center(world.get_center(), size, _zoom))
+		_overview_saved = saved_state
+	_update_hit_preview()
+	queue_redraw()
+
+func _wheel_zoom(step: float) -> void:
+	_follow_pan = null
+	_overview_saved = null
+	set_zoom(_zoom + step)
+
+func is_overview() -> bool:
+	return _overview_saved != null
+
+# Leva o centro da casa ao centro da tela (smooth = rola suavemente; senão, salta).
+func center_on_tile(gp: Vector2i, smooth: bool = false) -> void:
+	if _state == null:
+		return
+	_overview_saved = null
+	var target := _clamp_pan(BattleCamera.pan_to_center(_tile_center(gp.x, gp.y, _get_offset()), size, _zoom))
+	if smooth:
+		_follow_pan = target
+	else:
+		_follow_pan = null
+		_pan_offset = target
+		_update_hit_preview()
+		queue_redraw()
+
+# Câmera dinâmica: só se mexe se a casa não está visível na tela.
+func focus_tile_if_hidden(gp: Vector2i) -> void:
+	if _state == null or size.x < 1.0 or size.y < 1.0:
+		return
+	if not BattleCamera.tile_visible(_tile_screen_pos(gp), size):
+		center_on_tile(gp, true)
+
+# A casa está dentro da tela?
+func is_tile_visible(gp: Vector2i) -> bool:
+	return BattleCamera.tile_visible(_tile_screen_pos(gp), size, 0.0)
 
 # Posição de tela do centro de um tile (com zoom e pan).
 func _tile_screen_pos(gp: Vector2i) -> Vector2:
@@ -402,17 +527,13 @@ func snap_pointer_to_tile(gp: Vector2i) -> void:
 	elif p.y > size.y - margin:
 		shift.y = (size.y - margin) - p.y
 	_pan_by(shift)
+	_pointer_ready = true
 	pointer_pos = _tile_screen_pos(gp)
 	_update_hit_preview()
 	queue_redraw()
 
 # Redesenha cursor e prévia sem mexer na câmera (o cursor mudou por mouse/modo).
 func refresh_cursor_visuals() -> void:
-	_update_hit_preview()
-	queue_redraw()
-
-func cycle_zoom() -> void:
-	_zoom = BattleCamera.next_zoom(_zoom)
 	_update_hit_preview()
 	queue_redraw()
 
@@ -575,12 +696,15 @@ func _gui_input(event: InputEvent) -> void:
 		match mb.button_index:
 			MOUSE_BUTTON_WHEEL_UP:
 				if mb.pressed:
-					_zoom = clampf(_zoom + ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
+					_wheel_zoom(ZOOM_WHEEL_STEP)
 					queue_redraw()
 			MOUSE_BUTTON_WHEEL_DOWN:
 				if mb.pressed:
-					_zoom = clampf(_zoom - ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
+					_wheel_zoom(-ZOOM_WHEEL_STEP)
 					queue_redraw()
+			MOUSE_BUTTON_RIGHT:
+				if mb.pressed:
+					cancel_clicked.emit()
 			MOUSE_BUTTON_LEFT:
 				if mb.pressed:
 					# Botao esquerdo: inicia um possivel pan. So vira pan de fato
@@ -607,8 +731,9 @@ func _gui_input(event: InputEvent) -> void:
 			if not _left_dragged:
 				_left_dragged = true
 				mouse_default_cursor_shape = Control.CURSOR_DRAG
-			_pan_offset = (_pan_start_offset + delta).clamp(
-				Vector2(-MAX_PAN, -MAX_PAN), Vector2(MAX_PAN, MAX_PAN))
+			_pan_offset = _clamp_pan(_pan_start_offset + delta)
+			_follow_pan = null
+			_overview_saved = null
 			queue_redraw()
 		else:
 			var gp := _pointer_cell(motion.position)

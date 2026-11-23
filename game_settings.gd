@@ -7,15 +7,19 @@ static var PATH := "user://settings.cfg"
 # InputDevice consulta a cada vibração (evita reabrir o arquivo no meio do combate).
 static var vibration_enabled: bool = true
 
+# Câmera dinâmica de combate (BG3): vai até o combatente da vez se ele estiver fora da tela.
+static var dynamic_camera_enabled: bool = true
+
 static func load_settings() -> Dictionary:
 	var cfg := ConfigFile.new()
 	if cfg.load(PATH) != OK:
-		return {"fullscreen": false, "vsync": true, "resolution": "1280x720", "vibration": true}
+		return {"fullscreen": false, "vsync": true, "resolution": "1280x720", "vibration": true, "dynamic_camera": true}
 	return {
 		"fullscreen": cfg.get_value("display", "fullscreen", false),
 		"vsync":      cfg.get_value("display", "vsync", true),
 		"resolution": cfg.get_value("display", "resolution", "1280x720"),
 		"vibration":  cfg.get_value("input", "vibration", true),
+		"dynamic_camera": cfg.get_value("gameplay", "dynamic_camera", true),
 	}
 
 static func save_settings(settings: Dictionary) -> void:
@@ -24,10 +28,12 @@ static func save_settings(settings: Dictionary) -> void:
 	cfg.set_value("display", "vsync",      settings.get("vsync", true))
 	cfg.set_value("display", "resolution", settings.get("resolution", "1280x720"))
 	cfg.set_value("input",   "vibration",  settings.get("vibration", true))
+	cfg.set_value("gameplay", "dynamic_camera", settings.get("dynamic_camera", true))
 	cfg.save(PATH)
 
 static func apply_settings(settings: Dictionary) -> void:
 	vibration_enabled = settings.get("vibration", true)
+	dynamic_camera_enabled = settings.get("dynamic_camera", true)
 	DisplayServer.window_set_mode(
 		DisplayServer.WINDOW_MODE_FULLSCREEN if settings.get("fullscreen", false)
 		else DisplayServer.WINDOW_MODE_WINDOWED

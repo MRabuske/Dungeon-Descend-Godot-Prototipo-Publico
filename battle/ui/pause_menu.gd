@@ -207,9 +207,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	var handled := true
 	match (event as InputEventKey).keycode:
-		KEY_UP, KEY_W:
+		KEY_UP:
 			_move_focus(-1)
-		KEY_DOWN, KEY_S:
+		KEY_DOWN:
 			_move_focus(1)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			if _focused < _callbacks.size():

@@ -4,11 +4,13 @@ extends Node
 #
 # - Dispositivo ativo: o último a ser usado manda (InputDeviceTracker). Com o controle
 #   ativo o cursor do mouse fica oculto; mexer o mouse ou apertar tecla o devolve.
-# - Ponte: A/B/D-pad/LB/RB/Start (e o analógico esquerdo, fora do grid) viram teclas
+# - Ponte: A/B/D-pad/LB/RB/Start (e o analógico esquerdo, fora do combate e nos painéis modais) viram teclas
 #   sintéticas (Enter/Esc/setas/Q/E/P), então toda tela que já lê KEY_* funciona no
 #   controle sem reescrita. As teclas sintéticas levam a meta "bridged": o rastreador
 #   as ignora. (Verificado: parse_input_event entrega o evento no frame seguinte,
 #   mantendo a meta; por isso a marca é meta e não uma flag ao redor da chamada.)
+# - No combate o analógico esquerdo é o cursor livre do mundo (stick_drives_cursor, ligado pela cena)
+#   e NÃO vira setas; a barra de ações, o filtro e Confirmar/Voltar são do D-pad.
 # - Os eventos reais dos botões ponteados são consumidos para não acionar ui_accept
 #   duas vezes. X/Y/View/R3 seguem como actions (InputBindings) tratadas pela cena.
 # - Ordem de _input no Godot: nós mais tarde na árvore primeiro; a cena roda ANTES
@@ -47,15 +49,15 @@ func is_gamepad() -> bool:
 func cursor_axis() -> Vector2:
 	return _stick(JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y)
 
-# Analógico direito com zona morta: câmera.
-func camera_axis() -> Vector2:
-	return _stick(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
+# Zoom contínuo (BG3): analógico direito para cima aproxima (+), para baixo afasta (-), com zona
+# morta. O eixo horizontal não faz nada (jogo isométrico, sem rotação). Teclado: Page Up/Down.
+func zoom_axis() -> float:
+	var v: float = -_stick(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y).y
+	return v + Input.get_action_strength(InputBindings.ZOOM_IN) - Input.get_action_strength(InputBindings.ZOOM_OUT)
 
-# Visão de linha de visão dos inimigos: Shift ou gatilho esquerdo.
+# Visão de linha de visão dos inimigos: Shift ou gatilho direito (RT), segurado.
 func is_los_held() -> bool:
-	if Input.is_key_pressed(KEY_SHIFT):
-		return true
-	return is_gamepad() and Input.get_joy_axis(tracker.gamepad_id, JOY_AXIS_TRIGGER_LEFT) > 0.5
+	return Input.is_action_pressed(InputBindings.ENEMY_VIEW)
 
 # Vibra o controle ativo. Sem controle, desligado nas opções ou em cooldown: nada acontece.
 func rumble(kind: StringName) -> void:

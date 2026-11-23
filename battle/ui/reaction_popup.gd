@@ -192,10 +192,10 @@ func _input(event: InputEvent) -> void:
 			KEY_ESCAPE:
 				get_viewport().set_input_as_handled()
 				_resolve([])
-			KEY_UP, KEY_W:
+			KEY_UP:
 				get_viewport().set_input_as_handled()
 				_move_cursor(-1)
-			KEY_DOWN, KEY_S:
+			KEY_DOWN:
 				get_viewport().set_input_as_handled()
 				_move_cursor(1)
 			KEY_ENTER, KEY_KP_ENTER:

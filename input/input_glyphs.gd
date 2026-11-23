@@ -2,20 +2,24 @@ class_name InputGlyphs
 extends RefCounted
 
 # Texto da dica de botão por ação e dispositivo. "" = a ação não tem equivalente nesse
-# dispositivo e a dica some (ex.: Fim de turno só tem botão no mouse/controle).
-# Ações não listadas devolvem "".
+# dispositivo e a dica some (ex.: Visão geral só tem botão no controle).
+# Ações não listadas devolvem "". Esquema do BG3 (bg3.wiki "Controls"), ver docs/architecture/input.md.
 
 const _GAMEPAD := {
-	&"confirm": "A", &"back": "B", &"end_turn": "X", &"examine": "Y",
-	&"tabs": "LB/RB", &"los": "LT", &"log": "View", &"pause": "Start",
-	&"zoom": "R3", &"switch_hero": "L3", &"camera": "R-stick", &"navigate": "D-pad", &"cursor": "L-stick",
+	&"confirm": "A", &"back": "B", &"end_turn": "Y", &"examine": "X",
+	&"tabs": "LB/RB", &"los": "RT", &"log": "View", &"pause": "Start",
+	&"zoom": "R-stick", &"center": "LT", &"overview": "R3",
+	&"pan": "L-stick",
+	&"switch_hero": "L3", &"navigate": "D-pad", &"cursor": "L-stick",
 	&"start_party": "",
 }
 
 const _KEYBOARD := {
 	&"confirm": "Enter", &"back": "Esc", &"end_turn": "Space", &"examine": "Tab",
 	&"tabs": "Q/E", &"los": "Shift", &"log": "", &"pause": "P",
-	&"zoom": "", &"switch_hero": "H", &"camera": "", &"navigate": "Setas", &"cursor": "",
+	&"zoom": "Roda/PgUp/PgDn", &"center": "Home", &"overview": "",
+	&"pan": "WASD",
+	&"switch_hero": "H", &"navigate": "Setas", &"cursor": "",
 	&"start_party": "F",
 }
 

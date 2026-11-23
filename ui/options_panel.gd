@@ -32,6 +32,7 @@ const RESOLUTION_LABELS := ["1280 x 720", "1600 x 900", "1920 x 1080"]
 var _fullscreen_btn: TextureButton
 var _vsync_btn: TextureButton
 var _vibration_btn: TextureButton
+var _camera_btn: TextureButton
 var _overlay: ColorRect
 var _panel: Control
 var _res_dropdown_btn: TextureButton
@@ -77,7 +78,7 @@ func _build_panel() -> void:
 	add_child(center)
 
 	_panel = Control.new()
-	_panel.custom_minimum_size = Vector2(520, 410)
+	_panel.custom_minimum_size = Vector2(520, 470)
 	center.add_child(_panel)
 
 	# Background NinePatch
@@ -135,8 +136,12 @@ func _build_toggles(parent: Control) -> void:
 	_vibration_btn = _add_toggle(parent, "Vibração", settings.get("vibration", true), func(on: bool):
 		_save_and_apply("vibration", on)
 	)
-	# Store the three rows (last three children added to parent)
+	_camera_btn = _add_toggle(parent, "Câmera dinâmica", settings.get("dynamic_camera", true), func(on: bool):
+		_save_and_apply("dynamic_camera", on)
+	)
+	# Guarda as quatro linhas (os quatro últimos filhos adicionados)
 	var children := parent.get_children()
+	_option_items.append(children[children.size() - 4])
 	_option_items.append(children[children.size() - 3])
 	_option_items.append(children[children.size() - 2])
 	_option_items.append(children[children.size() - 1])
@@ -343,10 +348,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_DOWN, KEY_S:
 			_move_opt_focus(1)
 		KEY_LEFT, KEY_A:
-			if _focused_opt == 3:
+			if _focused_opt == 4:
 				_cycle_resolution(-1)
 		KEY_RIGHT, KEY_D:
-			if _focused_opt == 3:
+			if _focused_opt == 4:
 				_cycle_resolution(1)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			_activate_focused_opt()
@@ -390,8 +395,9 @@ func _activate_focused_opt() -> void:
 		0: _fullscreen_btn.pressed.emit()
 		1: _vsync_btn.pressed.emit()
 		2: _vibration_btn.pressed.emit()
-		3: _cycle_resolution(1)
-		4: hide_panel()
+		3: _camera_btn.pressed.emit()
+		4: _cycle_resolution(1)
+		5: hide_panel()
 
 func _cycle_resolution(delta: int) -> void:
 	_res_idx = (_res_idx + delta + RESOLUTIONS.size()) % RESOLUTIONS.size()

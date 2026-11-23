@@ -5,7 +5,7 @@ var _failed := 0
 # Um erro de runtime aborta a função de teste em silêncio e o que vem depois nunca roda. Cada função
 # de alto nível registra aqui que chegou ao fim; se faltar, a suíte falha (ver _check_completion).
 var _reached: Array = []
-const EXPECTED_TO_FINISH := ["_run_all", "_test_architecture_p2p7", "_test_bg3_rules_audit", "_test_movement_8dir", "_test_unified_metric", "_test_pass_through_allies", "_test_potion_cover_initiative", "_test_phase5_bg3_fixes", "_test_area_shapes", "_test_area_integration", "_test_shared_turn", "_test_enemy_target_downed", "_test_member_end_turn", "_test_class_registry", "_test_gamepad_support", "_test_hud_navigation", "_test_battle_scene_smoke", "_test_oa_preview", "_test_focus_ring", "_test_hero_actions_e2e", "_test_enemy_actions_e2e"]
+const EXPECTED_TO_FINISH := ["_run_all", "_test_architecture_p2p7", "_test_bg3_rules_audit", "_test_movement_8dir", "_test_unified_metric", "_test_pass_through_allies", "_test_potion_cover_initiative", "_test_phase5_bg3_fixes", "_test_area_shapes", "_test_area_integration", "_test_shared_turn", "_test_enemy_target_downed", "_test_member_end_turn", "_test_class_registry", "_test_gamepad_support", "_test_hud_navigation", "_test_battle_scene_smoke", "_test_oa_preview", "_test_focus_ring", "_test_hero_actions_e2e", "_test_enemy_actions_e2e", "_test_camera_controls", "_test_battle_stick_and_wasd"]
 
 # Os testes só gravam nesta pasta própria; o save do jogador fica em outro arquivo e nunca é
 # aberto para escrita nem apagado. Ao fim, a suíte prova que ele não mudou (_check_save_isolation).
@@ -4288,6 +4288,8 @@ func _run_all() -> void:
 	await _test_focus_ring()
 	await _test_hero_actions_e2e()
 	await _test_enemy_actions_e2e()
+	await _test_camera_controls()
+	await _test_battle_stick_and_wasd()
 	_reached.append("_run_all")
 
 # ── Auditoria BG3: regras conferidas na bg3.wiki (Poisoned, Prone, Stunned, Downed, Sneak Attack) ──
@@ -5939,9 +5941,9 @@ func _test_gamepad_support() -> void:
 	_eq("dica: confirmar no controle", InputGlyphs.label(&"confirm", InputDeviceTracker.Device.GAMEPAD), "A")
 	_eq("dica: confirmar no teclado", InputGlyphs.label(&"confirm", InputDeviceTracker.Device.KEYBOARD_MOUSE), "Enter")
 	_eq("dica: voltar no controle", InputGlyphs.label(&"back", InputDeviceTracker.Device.GAMEPAD), "B")
-	_eq("dica: fim de turno no teclado é Space (BG3), no controle X", [InputGlyphs.label(&"end_turn", InputDeviceTracker.Device.KEYBOARD_MOUSE), InputGlyphs.label(&"end_turn", InputDeviceTracker.Device.GAMEPAD)], ["Space", "X"])
+	_eq("dica: fim de turno no teclado é Space (BG3), no controle Y", [InputGlyphs.label(&"end_turn", InputDeviceTracker.Device.KEYBOARD_MOUSE), InputGlyphs.label(&"end_turn", InputDeviceTracker.Device.GAMEPAD)], ["Space", "Y"])
 	_eq("dica: exame no teclado é Tab", InputGlyphs.label(&"examine", InputDeviceTracker.Device.KEYBOARD_MOUSE), "Tab")
-	_eq("dica: exame no controle é Y", InputGlyphs.label(&"examine", InputDeviceTracker.Device.GAMEPAD), "Y")
+	_eq("dica: exame no controle é X", InputGlyphs.label(&"examine", InputDeviceTracker.Device.GAMEPAD), "X")
 	_eq("dica: ação desconhecida some", InputGlyphs.label(&"nada", InputDeviceTracker.Device.GAMEPAD), "")
 
 	# ── Cursor unificado, validade na confirmação, exame e vibração ──────────────
@@ -6143,32 +6145,101 @@ func _test_gamepad_support() -> void:
 	_eq("câmera: há mapa à direita, pode rolar para lá", BattleCamera.can_pan(big_map, view, Vector2(-30, 0)).x, -30.0)
 	_eq("câmera: sem mapa além da esquerda, para", BattleCamera.can_pan(Rect2(0, 10, 1400, 800), view, Vector2(30, 0)).x, 0.0)
 	_eq("câmera: há mapa abaixo, pode rolar para lá", BattleCamera.can_pan(big_map, view, Vector2(0, -30)).y, -30.0)
-	_eq("zoom: 1.0 vai para 1.5", BattleCamera.next_zoom(1.0), 1.5)
-	_eq("zoom: o maior volta ao menor", BattleCamera.next_zoom(2.0), 0.75)
-	_eq("zoom: valor fora dos níveis (roda do mouse) vai ao próximo", BattleCamera.next_zoom(0.9), 1.0)
-	_eq("zoom: acima do maior volta ao menor", BattleCamera.next_zoom(2.5), 0.75)
+	# Zoom: o mínimo sempre cabe o mapa inteiro, em qualquer tamanho de mapa e de tela.
+	for dims in [Vector2i(12, 7), Vector2i(8, 8), Vector2i(30, 30), Vector2i(3, 3)]:
+		for v: Vector2 in [Vector2(1000, 600), Vector2(640, 360), Vector2(1920, 800)]:
+			var world := Vector2((dims.x + dims.y) * 36.0, (dims.x + dims.y) * 18.0)
+			var zmin: float = BattleCamera.min_zoom(world, v)
+			_true("zoom mínimo %s em %s: o mapa inteiro cabe" % [dims, v], world.x * zmin <= v.x + 0.01 and world.y * zmin <= v.y + 0.01)
+			_true("zoom mínimo %s em %s: nunca passa de 1.0" % [dims, v], zmin <= 1.0)
+	var big_world := Vector2(2000.0, 1000.0)
+	_true("zoom: mapa maior que a tela afasta além de 0.75 (antigo piso)", BattleCamera.min_zoom(big_world, view) < 0.75)
+	_eq("zoom: clamp respeita o máximo", BattleCamera.clamp_zoom(9.0, big_world, view), BattleCamera.MAX_ZOOM)
+	_eq("zoom: clamp respeita o mínimo", BattleCamera.clamp_zoom(0.01, big_world, view), BattleCamera.min_zoom(big_world, view))
+	_true("zoom contínuo: eixo positivo aproxima", BattleCamera.zoom_step(1.0, 1.0, 0.1) > 1.0)
+	_true("zoom contínuo: eixo negativo afasta", BattleCamera.zoom_step(1.0, -1.0, 0.1) < 1.0)
+	_eq("zoom contínuo: eixo zero não muda", BattleCamera.zoom_step(1.3, 0.0, 0.1), 1.3)
+	_true("zoom contínuo: ida e volta se cancela", is_equal_approx(BattleCamera.zoom_step(BattleCamera.zoom_step(1.0, 1.0, 0.2), -1.0, 0.2), 1.0))
+	var pan_before := Vector2(40, -20)
+	var pan_after: Vector2 = BattleCamera.rescale_pan(pan_before, 1.0, 2.0)
+	_eq("zoom: o ponto no centro da tela fica no lugar (pan escala com o zoom)",
+		view * 0.5 - pan_before / 1.0, view * 0.5 - pan_after / 2.0)
+	# Pan: dentro do mapa, nunca perdido fora dele; mapa menor que a tela fica travado no centro.
+	var world_rect := Rect2(-500, 0, 1100, 550)
+	var lim_zoomed: Rect2 = BattleCamera.pan_limits(world_rect, view, 2.0)
+	_true("pan: com zoom o mapa pode rolar nos dois sentidos", lim_zoomed.size.x > 0.0 and lim_zoomed.size.y > 0.0)
+	_eq("pan: valor absurdo volta ao limite", BattleCamera.clamp_pan(Vector2(99999, -99999), world_rect, view, 2.0),
+		Vector2(lim_zoomed.end.x, lim_zoomed.position.y))
+	var lim_small: Rect2 = BattleCamera.pan_limits(Rect2(100, 100, 200, 100), view, 1.0)
+	_eq("pan: mapa menor que a tela fica travado", lim_small.size, Vector2.ZERO)
+	# Centralizar: um tile no canto do mapa vai para dentro da tela mesmo com zoom máximo.
+	var corner_world := Vector2(world_rect.position.x + 36.0, world_rect.position.y + 18.0)   # ponta esquerda
+	var cpan: Vector2 = BattleCamera.clamp_pan(BattleCamera.pan_to_center(corner_world, view, 2.5), world_rect, view, 2.5)
+	var corner_screen: Vector2 = corner_world * 2.5 + view * 0.5 * (1.0 - 2.5) + cpan
+	_true("centralizar: tile do canto fica dentro da tela", Rect2(Vector2.ZERO, view).has_point(corner_screen))
+	_eq("centralizar: tile do meio vai exatamente ao centro",
+		(Vector2(0, 275) * 1.0 + view * 0.5 * 0.0 + BattleCamera.pan_to_center(Vector2(0, 275), view, 1.0)), view * 0.5)
+	_true("visível: centro da tela é visível", BattleCamera.tile_visible(view * 0.5, view))
+	_true("visível: colado na borda não é (margem)", not BattleCamera.tile_visible(Vector2(10, 300), view))
 
 	# Ponte e actions do controle.
 	InputBindings.register()
 	var examine_events: int = InputMap.action_get_events(InputBindings.EXAMINE).size()
 	InputBindings.register()
 	_eq("bindings: registrar duas vezes não duplica eventos", InputMap.action_get_events(InputBindings.EXAMINE).size(), examine_events)
-	for act in [InputBindings.END_TURN, InputBindings.EXAMINE, InputBindings.LOG, InputBindings.ZOOM_CYCLE]:
+	for act in [InputBindings.END_TURN, InputBindings.EXAMINE, InputBindings.LOG, InputBindings.ZOOM_OVERVIEW,
+			InputBindings.SWITCH_HERO, InputBindings.ZOOM_IN, InputBindings.ZOOM_OUT,
+			InputBindings.CENTER_CAMERA, InputBindings.ENEMY_VIEW]:
 		_true("bindings: action %s registrada" % act, InputMap.has_action(act))
 	var tab_ev := InputEventKey.new()
 	tab_ev.keycode = KEY_TAB
 	_true("bindings: Tab dispara o exame", InputMap.event_is_action(tab_ev, InputBindings.EXAMINE))
+	var x_ev := InputEventJoypadButton.new()
+	x_ev.button_index = JOY_BUTTON_X
+	_true("bindings (BG3): X dispara o exame", InputMap.event_is_action(x_ev, InputBindings.EXAMINE))
+	_true("bindings (BG3): X não encerra o turno", not InputMap.event_is_action(x_ev, InputBindings.END_TURN))
 	var y_ev := InputEventJoypadButton.new()
 	y_ev.button_index = JOY_BUTTON_Y
-	_true("bindings: Y dispara o exame", InputMap.event_is_action(y_ev, InputBindings.EXAMINE))
+	_true("bindings (BG3): Y encerra/cancela o turno", InputMap.event_is_action(y_ev, InputBindings.END_TURN))
+	_true("bindings (BG3): Y não examina", not InputMap.event_is_action(y_ev, InputBindings.EXAMINE))
+	var r3_ev := InputEventJoypadButton.new()
+	r3_ev.button_index = JOY_BUTTON_RIGHT_STICK
+	_true("bindings (BG3): R3 é a visão geral", InputMap.event_is_action(r3_ev, InputBindings.ZOOM_OVERVIEW))
+	var lt_ev := InputEventJoypadMotion.new()
+	lt_ev.axis = JOY_AXIS_TRIGGER_LEFT
+	lt_ev.axis_value = 1.0
+	_true("bindings (BG3): LT centraliza a câmera", InputMap.event_is_action(lt_ev, InputBindings.CENTER_CAMERA))
+	_true("bindings (BG3): LT não é mais a visão inimiga", not InputMap.event_is_action(lt_ev, InputBindings.ENEMY_VIEW))
+	var rt_ev := InputEventJoypadMotion.new()
+	rt_ev.axis = JOY_AXIS_TRIGGER_RIGHT
+	rt_ev.axis_value = 1.0
+	_true("bindings (BG3): RT é a visão inimiga", InputMap.event_is_action(rt_ev, InputBindings.ENEMY_VIEW))
+	var home_ev := InputEventKey.new()
+	home_ev.keycode = KEY_HOME
+	_true("bindings: Home centraliza a câmera", InputMap.event_is_action(home_ev, InputBindings.CENTER_CAMERA))
+	var pgup_ev := InputEventKey.new()
+	pgup_ev.keycode = KEY_PAGEUP
+	_true("bindings: Page Up aproxima", InputMap.event_is_action(pgup_ev, InputBindings.ZOOM_IN))
+	var pgdn_ev := InputEventKey.new()
+	pgdn_ev.keycode = KEY_PAGEDOWN
+	_true("bindings: Page Down afasta", InputMap.event_is_action(pgdn_ev, InputBindings.ZOOM_OUT))
+	_eq("dicas: fim de turno no controle é Y", InputGlyphs.label(&"end_turn", InputDeviceTracker.Device.GAMEPAD), "Y")
+	_eq("dicas: examinar no controle é X", InputGlyphs.label(&"examine", InputDeviceTracker.Device.GAMEPAD), "X")
+	_eq("dicas: visão inimiga no controle é RT", InputGlyphs.label(&"los", InputDeviceTracker.Device.GAMEPAD), "RT")
+	_eq("dicas: centralizar no controle é LT", InputGlyphs.label(&"center", InputDeviceTracker.Device.GAMEPAD), "LT")
+	_eq("dicas: visão geral no controle é R3", InputGlyphs.label(&"overview", InputDeviceTracker.Device.GAMEPAD), "R3")
+	_true("dicas: zoom existe no controle", InputGlyphs.label(&"zoom", InputDeviceTracker.Device.GAMEPAD) != "")
+	_true("dicas: zoom no teclado cita a roda e Page Up/Down", InputGlyphs.label(&"zoom", InputDeviceTracker.Device.KEYBOARD_MOUSE).contains("PgUp"))
+	_eq("dicas: centralizar no teclado é Home", InputGlyphs.label(&"center", InputDeviceTracker.Device.KEYBOARD_MOUSE), "Home")
+	_eq("dicas: visão geral não tem tecla (a dica some)", InputGlyphs.label(&"overview", InputDeviceTracker.Device.KEYBOARD_MOUSE), "")
 	_eq("ponte: A vira Enter", InputBindings.bridge_key(JOY_BUTTON_A), KEY_ENTER)
 	_eq("ponte: B vira Esc", InputBindings.bridge_key(JOY_BUTTON_B), KEY_ESCAPE)
 	_eq("ponte: D-pad esquerdo vira seta", InputBindings.bridge_key(JOY_BUTTON_DPAD_LEFT), KEY_LEFT)
 	_eq("ponte: LB vira Q (aba anterior)", InputBindings.bridge_key(JOY_BUTTON_LEFT_SHOULDER), KEY_Q)
 	_eq("ponte: RB vira E (próxima aba)", InputBindings.bridge_key(JOY_BUTTON_RIGHT_SHOULDER), KEY_E)
 	_eq("ponte: Start vira P (pausa)", InputBindings.bridge_key(JOY_BUTTON_START), KEY_P)
-	_eq("ponte: X não é ponteado (action de fim de turno)", InputBindings.bridge_key(JOY_BUTTON_X), 0)
-	_eq("ponte: Y não é ponteado (action de exame)", InputBindings.bridge_key(JOY_BUTTON_Y), 0)
+	_eq("ponte: X não é ponteado (action de exame)", InputBindings.bridge_key(JOY_BUTTON_X), 0)
+	_eq("ponte: Y não é ponteado (action de fim de turno)", InputBindings.bridge_key(JOY_BUTTON_Y), 0)
 	_true("ponte: setas repetem", InputBindings.repeats(KEY_UP))
 	_true("ponte: Enter não repete", not InputBindings.repeats(KEY_ENTER))
 	var idev: Node = root.get_node_or_null("InputDevice")
@@ -6196,6 +6267,13 @@ func _test_gamepad_support() -> void:
 	_eq("settings: arquivo legado mantém as demais chaves", GameSettings.load_settings()["vsync"], false)
 	GameSettings.apply_settings({"fullscreen": false, "vsync": true, "resolution": "1280x720", "vibration": false})
 	_eq("settings: apply_settings espelha a vibração", GameSettings.vibration_enabled, false)
+	_true("settings: câmera dinâmica liga por padrão (arquivo legado sem a chave)", GameSettings.load_settings()["dynamic_camera"])
+	GameSettings.save_settings({"fullscreen": false, "vsync": true, "resolution": "1280x720", "vibration": true, "dynamic_camera": false})
+	_eq("settings: câmera dinâmica desligada persiste", GameSettings.load_settings()["dynamic_camera"], false)
+	GameSettings.apply_settings(GameSettings.load_settings())
+	_eq("settings: apply_settings espelha a câmera dinâmica", GameSettings.dynamic_camera_enabled, false)
+	GameSettings.apply_settings({"fullscreen": false, "vsync": true, "resolution": "1280x720", "vibration": true, "dynamic_camera": true})
+	_eq("settings: câmera dinâmica volta a ligar", GameSettings.dynamic_camera_enabled, true)
 	DirAccess.remove_absolute(GameSettings.PATH)
 	GameSettings.PATH = real_settings_path
 	GameSettings.vibration_enabled = real_vibration
@@ -6825,7 +6903,7 @@ func _test_hud_tooltip(scene, panel, st: BattleState, idev: Node) -> void:
 	_true("painel: no controle, reaparece ao voltar à HUD", tip.visible and tip._name_lbl.text == "Mover")
 
 	# Some ao examinar e ao pausar
-	await _press_joy(JOY_BUTTON_Y)
+	await _press_joy(JOY_BUTTON_X)
 	_true("painel: some ao entrar no exame", not tip.visible)
 	await _press_joy(JOY_BUTTON_B)
 	await create_timer(wait).timeout
@@ -6835,6 +6913,369 @@ func _test_hud_tooltip(scene, panel, st: BattleState, idev: Node) -> void:
 	await _press_joy(JOY_BUTTON_B)
 	await create_timer(0.4).timeout
 	await _frames(3)
+
+# Câmera e comandos do BG3 na cena de combate real, por eventos reais (Page Up/Down, Home, R3, LT, RT,
+# X, Y): enquadramento inicial, zoom contínuo limitado, visão geral, centralizar e câmera dinâmica.
+func _joy_axis_event(axis: int, value: float) -> void:
+	var ev := InputEventJoypadMotion.new()
+	ev.device = 0
+	ev.axis = axis as JoyAxis
+	ev.axis_value = value
+	Input.parse_input_event(ev)
+
+func _test_camera_controls() -> void:
+	var saved_tq: Array = BattleState.TURN_QUEUE
+	var saved_pl: Array = BattleState.PLAYERS
+	var saved_run = DungeonState.current_run
+	var saved_dyn: bool = GameSettings.dynamic_camera_enabled
+	DungeonState.current_run = null
+	BattleState.setup_party(["Guerreiro", "Mago", "Clérigo"])
+	DiceRoller.force_next([20, 20, 20, 1, 1, 1, 1])   # heróis jogam primeiro
+	var scene = load("res://battle/battle_scene.tscn").instantiate()
+	root.add_child(scene)
+	await _frames(3)
+	DiceRoller.clear_forced()
+	var waited := 0
+	while waited < 1500 and (scene._animating or scene._state.current_state != BattleState.State.PLAYER_TURN):
+		await process_frame
+		waited += 1
+	var st: BattleState = scene._state
+	var area = scene._battle_area
+	var idev: Node = root.get_node("InputDevice")
+	area.size = Vector2(1000, 500)   # o headless tem janela de 64x64: fixa uma área realista
+	await _frames(2)
+	_eq("câmera: a área de combate tem o tamanho fixado", area.size, Vector2(1000, 500))
+	scene._camera_idx = -2   # refaz o enquadramento inicial já com o tamanho certo
+	scene._refresh_ui()
+
+	# Enquadramento inicial: o combatente da vez está na tela.
+	var first_idx: int = st.active_index
+	_true("câmera: ao entrar, o combatente da vez está enquadrado", area.is_tile_visible(st.combatant_positions[first_idx]))
+
+	# Zoom: contínuo, por teclado (Page Up/Down) e limitado.
+	area.set_zoom(1.0)
+	var z0: float = area.get_zoom()
+	var down := InputEventKey.new()
+	down.keycode = KEY_PAGEDOWN
+	down.physical_keycode = KEY_PAGEDOWN
+	down.pressed = true
+	Input.parse_input_event(down)
+	await create_timer(0.25).timeout
+	down.pressed = false
+	Input.parse_input_event(down)
+	await _frames(2)
+	_true("zoom: Page Down segurado afasta aos poucos", area.get_zoom() < z0)
+	var up := InputEventKey.new()
+	up.keycode = KEY_PAGEUP
+	up.physical_keycode = KEY_PAGEUP
+	up.pressed = true
+	Input.parse_input_event(up)
+	var z_mid: float = area.get_zoom()
+	await create_timer(0.25).timeout
+	up.pressed = false
+	Input.parse_input_event(up)
+	await _frames(2)
+	_true("zoom: Page Up segurado aproxima", area.get_zoom() > z_mid)
+	area.set_zoom(99.0)
+	_eq("zoom: não passa do máximo", area.get_zoom(), BattleCamera.MAX_ZOOM)
+	area.set_zoom(0.001)
+	_eq("zoom: o mínimo é o que cabe o mapa", area.get_zoom(), area.get_min_zoom())
+	var map_rect: Rect2 = area._map_screen_rect()
+	_true("zoom mínimo: o mapa inteiro cabe na tela",
+		map_rect.size.x <= area.size.x + 0.5 and map_rect.size.y <= area.size.y + 0.5)
+
+	# Visão geral (R3): afasta até caber e volta ao zoom anterior.
+	await _press_joy(JOY_BUTTON_A)   # acorda o controle
+	_true("câmera: controle ativo", idev.is_gamepad())
+	area.set_zoom(1.5)
+	var pan_before: Vector2 = area.get_pan()
+	await _press_joy(JOY_BUTTON_RIGHT_STICK)
+	_true("visão geral: R3 entra", area.is_overview())
+	_eq("visão geral: afasta até o zoom mínimo", area.get_zoom(), area.get_min_zoom())
+	await _press_joy(JOY_BUTTON_RIGHT_STICK)
+	_true("visão geral: R3 de novo sai", not area.is_overview())
+	_eq("visão geral: volta ao zoom anterior", area.get_zoom(), 1.5)
+	_eq("visão geral: volta à posição anterior", area.get_pan(), pan_before)
+
+	# Centralizar (LT e Home): herói no canto do mapa, zoom máximo.
+	var corner := Vector2i(st.grid_cols - 1, 0)
+	st.combatant_positions[first_idx] = corner
+	area.set_zoom(BattleCamera.MAX_ZOOM)
+	area.center_on_tile(Vector2i(0, st.grid_rows - 1))   # câmera no canto oposto
+	_true("centralizar: pré-condição, o herói está fora da tela", not area.is_tile_visible(corner))
+	_joy_axis_event(JOY_AXIS_TRIGGER_LEFT, 1.0)   # LT
+	await create_timer(1.3).timeout
+	_joy_axis_event(JOY_AXIS_TRIGGER_LEFT, 0.0)
+	await _frames(2)
+	_true("centralizar: LT traz o personagem ativo (no canto) para dentro da tela", area.is_tile_visible(corner))
+	area.center_on_tile(Vector2i(0, st.grid_rows - 1))
+	_true("centralizar: pré-condição 2", not area.is_tile_visible(corner))
+	await _press_key(KEY_HOME)
+	await create_timer(1.3).timeout
+	_true("centralizar: Home traz o personagem ativo para dentro da tela", area.is_tile_visible(corner))
+
+	# RT segurado mostra a visão dos inimigos; LT não.
+	_true("visão inimiga: começa desligada", not scene._los_overlay_on)
+	_joy_axis_event(JOY_AXIS_TRIGGER_LEFT, 1.0)
+	await _frames(3)
+	_true("visão inimiga: LT não mostra (agora centraliza)", not scene._los_overlay_on)
+	_joy_axis_event(JOY_AXIS_TRIGGER_LEFT, 0.0)
+	_joy_axis_event(JOY_AXIS_TRIGGER_RIGHT, 1.0)
+	await _frames(3)
+	_true("visão inimiga: RT segurado mostra", scene._los_overlay_on)
+	_joy_axis_event(JOY_AXIS_TRIGGER_RIGHT, 0.0)
+	await _frames(3)
+	_true("visão inimiga: soltar o RT esconde", not scene._los_overlay_on)
+
+	# Câmera dinâmica: trocar de herói leva a câmera até ele se estiver fora da tela, e a opção desliga.
+	var other := -1
+	for m in st.switchable_members():
+		if m != st.active_index:
+			other = m
+			break
+	_true("câmera dinâmica: há outro herói para trocar", other != -1)
+	if other != -1:
+		var far := Vector2i(0, st.grid_rows - 1)
+		var back_idx: int = st.active_index
+		st.combatant_positions[other] = far
+		for dyn in [true, false]:
+			GameSettings.dynamic_camera_enabled = dyn
+			area.set_zoom(BattleCamera.MAX_ZOOM)
+			area.center_on_tile(st.combatant_positions[st.active_index])
+			var pan_still: Vector2 = area.get_pan()
+			_true("câmera dinâmica (%s): pré-condição, o outro herói está fora da tela" % dyn, not area.is_tile_visible(st.combatant_positions[other]))
+			scene._switch_hero_to(other)
+			await create_timer(1.3).timeout
+			if dyn:
+				_true("câmera dinâmica ligada: a câmera foi até o herói que assumiu", area.is_tile_visible(st.combatant_positions[st.active_index]))
+			else:
+				_eq("câmera dinâmica desligada: a câmera não se mexe", area.get_pan(), pan_still)
+				_true("câmera dinâmica desligada: o herói segue fora da tela", not area.is_tile_visible(st.combatant_positions[st.active_index]))
+			scene._switch_hero_to(back_idx)
+			await _frames(2)
+	GameSettings.dynamic_camera_enabled = true
+
+	# Y encerra o turno e, num herói que encerrou, cancela; X abre o exame (barra de turnos).
+	area.set_zoom(1.0)
+	var ender: int = st.active_index
+	await _press_joy(JOY_BUTTON_X)
+	_eq("controle: X abre o exame na barra de turnos", scene._examine_focus, scene.ExamineFocus.BAR)
+	await _press_joy(JOY_BUTTON_B)
+	_eq("controle: B sai do exame", scene._examine_focus, scene.ExamineFocus.NONE)
+	_true("controle: X não encerrou o turno", not st.is_member_ended(ender))
+	await _press_joy(JOY_BUTTON_Y)
+	_true("controle: Y encerra o turno do herói ativo", st.is_member_ended(ender))
+	scene._switch_hero_to(ender)
+	await _frames(2)
+	if st.active_index == ender:
+		await _press_joy(JOY_BUTTON_Y)
+		_true("controle: Y num herói que encerrou cancela o fim de turno", not st.is_member_ended(ender))
+	else:
+		_true("controle: o herói que encerrou pode ser selecionado de novo", false)
+
+	idev.tracker.pointer_active = false
+	scene.queue_free()
+	await _frames(2)
+	GameSettings.dynamic_camera_enabled = saved_dyn
+	BattleState.TURN_QUEUE = saved_tq
+	BattleState.PLAYERS = saved_pl
+	DungeonState.current_run = saved_run
+	_reached.append("_test_camera_controls")
+
+# BG3: o analógico esquerdo é o cursor livre durante todo o combate (turno neutro incluído) e leva a
+# câmera à borda; o D-pad navega a barra de ações; W/A/S/D movem só a câmera na batalha (as setas seguem
+# nos cursores); fora da batalha o analógico esquerdo e o WASD continuam navegando os menus.
+func _hold_stick(axis: int, value: float, secs: float) -> void:
+	_joy_axis_event(axis, value)
+	await create_timer(secs).timeout
+	_joy_axis_event(axis, 0.0)
+	await _frames(2)
+
+func _hold_key(code: int, secs: float) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = code as Key
+	ev.physical_keycode = code as Key
+	ev.pressed = true
+	Input.parse_input_event(ev)
+	await create_timer(secs).timeout
+	ev.pressed = false
+	Input.parse_input_event(ev)
+	await _frames(2)
+
+func _pan_in_limits(area) -> bool:
+	var lim: Rect2 = BattleCamera.pan_limits(area._map_world_rect(), area.size, area.get_zoom())
+	return lim.grow(0.5).has_point(area.get_pan())
+
+func _test_battle_stick_and_wasd() -> void:
+	var saved_tq: Array = BattleState.TURN_QUEUE
+	var saved_pl: Array = BattleState.PLAYERS
+	var saved_run = DungeonState.current_run
+	DungeonState.current_run = null
+	BattleState.setup_party(["Guerreiro", "Mago", "Clérigo"])
+	DiceRoller.force_next([20, 20, 20, 1, 1, 1, 1])
+	var scene = load("res://battle/battle_scene.tscn").instantiate()
+	root.add_child(scene)
+	await _frames(3)
+	DiceRoller.clear_forced()
+	var waited := 0
+	while waited < 1500 and (scene._animating or scene._state.current_state != BattleState.State.PLAYER_TURN):
+		await process_frame
+		waited += 1
+	var st: BattleState = scene._state
+	var area = scene._battle_area
+	var panel = scene._action_panel
+	var idev: Node = root.get_node("InputDevice")
+	area.size = Vector2(1000, 500)
+	await _frames(2)
+	await _press_key(KEY_F12)         # volta ao teclado (testes anteriores deixam o controle ativo)
+	await _press_joy(JOY_BUTTON_A)   # acorda o controle sem acionar nada
+	_true("analógico: controle ativo", idev.is_gamepad())
+	_eq("analógico: turno neutro", st.current_state, BattleState.State.PLAYER_TURN)
+
+	# Causa do bug: no turno neutro o analógico esquerdo virava setas e o cursor livre não existia.
+	await _frames(2)
+	_true("analógico: no turno neutro o cursor livre existe (stick_drives_cursor)", idev.stick_drives_cursor)
+	var nav_before: String = panel.nav_id()
+	var ptr_before: Vector2 = area.pointer_pos
+	_joy_axis_event(JOY_AXIS_LEFT_X, 1.0)
+	await create_timer(0.25).timeout
+	_true("analógico: no turno neutro não vira seta (a ponte fica de fora)", not idev._held.has("stick"))
+	_joy_axis_event(JOY_AXIS_LEFT_X, 0.0)
+	await _frames(2)
+	_eq("analógico: no turno neutro NÃO navega a barra de ações", panel.nav_id(), nav_before)
+	_true("analógico: no turno neutro move o cursor livre", area.pointer_pos.x > ptr_before.x)
+	_eq("analógico: no turno neutro não executa nada", st.current_state, BattleState.State.PLAYER_TURN)
+	await _press_joy(JOY_BUTTON_DPAD_RIGHT)
+	_true("D-pad: navega a barra de ações no turno neutro", panel.nav_id() != nav_before)
+
+	# Hover neutro: mostra o combatente sob o cursor, sem mudar o estado.
+	var hero_pos: Vector2i = st.combatant_positions[st.active_index]
+	var cur_before: Vector2i = st.cursor_tile
+	scene._on_tile_hovered(hero_pos)
+	_true("hover neutro: mostra o combatente sob o cursor", scene._enemy_info_panel.visible)
+	_eq("hover neutro: não muda o cursor de quadrado", st.cursor_tile, cur_before)
+	scene._on_tile_hovered(Vector2i(-1, -1))
+	_true("hover neutro: sair do combatente esconde o painel", not scene._enemy_info_panel.visible)
+
+	# Levar o cursor à borda rola a câmera, em todos os estados, sempre dentro dos limites de pan.
+	for state_name in ["neutro", "movimento", "mira", "turno inimigo"]:
+		match state_name:
+			"movimento":
+				st.enter_move_mode()
+			"mira":
+				st.cancel_move()
+				st.enter_attack_mode(10, false)
+			"turno inimigo":
+				st.cancel_attack()
+				st.current_state = BattleState.State.ENEMY_TURN
+		await _frames(2)
+		_true("borda (%s): o cursor livre está ativo" % state_name, idev.stick_drives_cursor)
+		area.set_zoom(BattleCamera.MAX_ZOOM)
+		area.center_on_tile(Vector2i(0, st.grid_rows - 1))   # há mapa à direita
+		area.pointer_pos = Vector2(area.size.x * 0.5, area.size.y * 0.5)
+		var pan0: Vector2 = area.get_pan()
+		await _hold_stick(JOY_AXIS_LEFT_X, 1.0, 1.6)
+		_true("borda (%s): o cursor chegou na faixa de borda" % state_name, area.pointer_pos.x > area.size.x - BattleCamera.EDGE_MARGIN)
+		_true("borda (%s): a câmera rolou para a direita" % state_name, area.get_pan().x < pan0.x - 1.0)
+		_true("borda (%s): pan dentro dos limites" % state_name, _pan_in_limits(area))
+	st.current_state = BattleState.State.PLAYER_TURN
+	await _frames(2)
+
+	# W/A/S/D: só câmera. Em movimento, o cursor de quadrado não muda; as setas continuam movendo-o.
+	st.enter_move_mode()
+	scene._sync_cursor_on_enter()
+	await _frames(2)
+	area.set_zoom(BattleCamera.MAX_ZOOM)
+	area.center_on_tile(Vector2i(st.grid_cols / 2, st.grid_rows / 2))   # no meio do mapa: dá para andar nos quatro sentidos
+	var tile0: Vector2i = st.cursor_tile
+	var pan_k: Vector2 = area.get_pan()
+	await _hold_key(KEY_D, 0.3)
+	_true("WASD: D move a câmera para a direita (o mundo anda para a esquerda)", area.get_pan().x < pan_k.x - 1.0)
+	_eq("WASD: D não mexe no cursor de quadrado", st.cursor_tile, tile0)
+	pan_k = area.get_pan()
+	await _hold_key(KEY_S, 0.3)
+	_true("WASD: S move a câmera para baixo", area.get_pan().y < pan_k.y - 1.0)
+	pan_k = area.get_pan()
+	await _hold_key(KEY_A, 0.3)
+	_true("WASD: A move a câmera para a esquerda", area.get_pan().x > pan_k.x + 1.0)
+	pan_k = area.get_pan()
+	await _hold_key(KEY_W, 0.3)
+	_true("WASD: W move a câmera para cima", area.get_pan().y > pan_k.y + 1.0)
+	_eq("WASD: nada disso mexeu no cursor de quadrado", st.cursor_tile, tile0)
+	_eq("WASD: velocidade na diagonal = a de um eixo só", BattleCamera.key_pan_velocity(Vector2(1, 1)).length(), BattleCamera.KEY_PAN_SPEED)
+	_eq("WASD: sem tecla, sem movimento", BattleCamera.key_pan_velocity(Vector2.ZERO), Vector2.ZERO)
+	await _hold_key(KEY_A, 2.5)
+	_true("WASD: segurar muito tempo respeita os limites de pan", _pan_in_limits(area))
+	await _hold_key(KEY_W, 2.5)
+	_true("WASD: limites de pan também na vertical", _pan_in_limits(area))
+	var tile1: Vector2i = st.cursor_tile
+	await _press_key(KEY_RIGHT)
+	_true("setas: continuam movendo o cursor de quadrado", st.cursor_tile != tile1)
+	var rclick := InputEventMouseButton.new()
+	rclick.button_index = MOUSE_BUTTON_RIGHT
+	rclick.pressed = true
+	area._gui_input(rclick)
+	_eq("BG3: botão direito no mapa cancela o modo de movimento", st.current_state, BattleState.State.PLAYER_TURN)
+	st.enter_attack_mode(10, false)
+	area._gui_input(rclick)
+	_eq("BG3: botão direito no mapa cancela a mira", st.current_state, BattleState.State.PLAYER_TURN)
+	st.enter_move_mode()
+	await _press_key(KEY_ESCAPE)
+	_eq("Esc: volta ao turno neutro", st.current_state, BattleState.State.PLAYER_TURN)
+
+	# Neutro: W/A/S/D não navegam a barra de ações; as setas navegam.
+	var nav_n: String = panel.nav_id()
+	await _press_key(KEY_S)
+	await _press_key(KEY_D)
+	_eq("WASD: no turno neutro não navega a barra de ações", panel.nav_id(), nav_n)
+	await _press_key(KEY_RIGHT)
+	_true("setas: no turno neutro navegam a barra de ações", panel.nav_id() != nav_n)
+
+	# Campo de texto com foco: o WASD não é roubado pela câmera.
+	var field := LineEdit.new()
+	scene.add_child(field)
+	field.grab_focus()
+	await _frames(2)
+	var pan_t: Vector2 = area.get_pan()
+	await _hold_key(KEY_D, 0.3)
+	_eq("WASD: com campo de texto em foco, a câmera não anda", area.get_pan(), pan_t)
+	field.queue_free()
+	await _frames(2)
+
+	# Seleção de personagem do BG3: ], [ e F1-F4.
+	var first: int = st.active_index
+	await _press_key(KEY_BRACKETRIGHT)
+	_true("BG3: ] seleciona o próximo personagem", st.active_index != first)
+	await _press_key(KEY_BRACKETLEFT)
+	_eq("BG3: [ volta ao personagem anterior", st.active_index, first)
+	var want_name: String = BattleState.PLAYERS[2]["name"]
+	await _press_key(KEY_F3)
+	_eq("BG3: F3 seleciona o 3º da party", BattleState.TURN_QUEUE[st.active_index]["name"], want_name)
+
+	idev.tracker.pointer_active = false
+	scene.queue_free()
+	await _frames(2)
+
+	# Fora da batalha: WASD e analógico esquerdo continuam navegando (seleção de grupo).
+	var ps = load("res://ui/party_select.tscn").instantiate()
+	root.add_child(ps)
+	await _frames(2)
+	_true("menu: fora da batalha o analógico não vira cursor livre", not idev.stick_drives_cursor)
+	var c0: int = ps._cursor
+	await _press_key(KEY_D)
+	_true("menu: D navega fora da batalha", ps._cursor != c0)
+	c0 = ps._cursor
+	await _press_key(KEY_A)
+	_true("menu: A navega fora da batalha", ps._cursor != c0)
+	await _press_joy(JOY_BUTTON_A)   # volta ao controle (o menu pode reagir ao A, não importa)
+# O analógico vira setas (a ponte): enquanto empurrado há uma seta segurada, e não um cursor livre.	_joy_axis_event(JOY_AXIS_LEFT_X, 1.0)	await _frames(3)	_true("menu: o analógico esquerdo vira setas fora da batalha", idev._held.has("stick"))	_joy_axis_event(JOY_AXIS_LEFT_X, 0.0)	await _frames(3)	_true("menu: soltar o analógico solta a seta", not idev._held.has("stick"))
+	idev.tracker.pointer_active = false
+	ps.queue_free()
+	await _frames(2)
+	BattleState.TURN_QUEUE = saved_tq
+	BattleState.PLAYERS = saved_pl
+	DungeonState.current_run = saved_run
+	_reached.append("_test_battle_stick_and_wasd")
 
 func _write_save_text(text: String, path: String = DungeonState.SAVE_PATH) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)

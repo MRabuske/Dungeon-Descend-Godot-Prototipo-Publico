@@ -25,6 +25,7 @@ var _action_panel: ActionPanel
 var _log_panel: CombatLogPanel
 var _log_toggle_btn: Button
 var _hint_bar: HintBar
+var _camera_hint_bar: HintBar   # linha de cima: comandos de câmera, sempre os mesmos
 var _end_turn_btn: Button
 var _result_screen: BattleResultScreen
 var _pause_menu: PauseMenu
@@ -196,6 +197,13 @@ func _build_hud(parent: Control) -> void:
 	_hint_bar.set_anchor_and_offset(SIDE_LEFT,  0.0, 12)
 	_hint_bar.set_anchor_and_offset(SIDE_RIGHT, 0.75, 0)
 	add_child(_hint_bar)
+	_camera_hint_bar = HintBar.new()
+	_camera_hint_bar.z_index = 150
+	_camera_hint_bar.alignment = BoxContainer.ALIGNMENT_BEGIN
+	_camera_hint_bar.set_anchor_and_offset(SIDE_LEFT,  0.0, 12)
+	_camera_hint_bar.set_anchor_and_offset(SIDE_RIGHT, 0.75, 0)
+	add_child(_camera_hint_bar)
+	_camera_hint_bar.set_hints([[&"pan", "Mover câmera"], [&"zoom", "Zoom"], [&"center", "Centralizar"], [&"overview", "Visão geral"]])
 	_position_hud_overlays()
 
 # Reposiciona os overlays do log (painel + toggle) logo acima da HUD, acompanhando
@@ -210,6 +218,9 @@ func _position_hud_overlays() -> void:
 	if _hint_bar != null:
 		_hint_bar.set_anchor_and_offset(SIDE_BOTTOM, 1.0, -_hud_h - 8)
 		_hint_bar.set_anchor_and_offset(SIDE_TOP,    1.0, -_hud_h - 34)
+	if _camera_hint_bar != null:
+		_camera_hint_bar.set_anchor_and_offset(SIDE_BOTTOM, 1.0, -_hud_h - 36)
+		_camera_hint_bar.set_anchor_and_offset(SIDE_TOP,    1.0, -_hud_h - 62)
 
 func _on_hud_height_changed(h: int) -> void:
 	_hud_h = h
@@ -256,6 +267,7 @@ func _connect_signals() -> void:
 	_battle_area.tile_clicked.connect(_on_tile_clicked)
 	_battle_area.tile_hovered.connect(_on_tile_hovered)
 	_battle_area.attack_hover_changed.connect(_on_attack_hover_changed)
+	_battle_area.cancel_clicked.connect(_on_area_cancel_clicked)
 
 	_action_panel.cancel_action.connect(func():
 		_pending_attack_slot_level = 0  # Cancela o slot que não foi gasto
@@ -352,6 +364,7 @@ func _refresh_ui() -> void:
 
 	_turn_bar.refresh(BattleState.TURN_QUEUE, _state.active_index, _state)
 	_battle_area.refresh(_state.active_index)
+	_follow_active_camera()
 	_action_panel.refresh()
 	# O mesmo botão encerra o turno do herói ativo e, num herói que já encerrou, cancela o fim de turno.
 	_end_turn_btn.text = "↩\nVOLTAR" if _state.active_ended() else "⏳\nFIM"
@@ -373,7 +386,7 @@ func _update_hints() -> void:
 		hints = [[&"confirm", "Confirmar"], [&"back", "Cancelar"]]
 	elif _state.current_state == BattleState.State.MOVE_MODE or _state.current_state == BattleState.State.ATTACK_MODE:
 		hints = [[&"cursor", "Cursor"], [&"navigate", "Quadrado"], [&"confirm", "Confirmar"],
-			[&"back", "Cancelar"], [&"camera", "Câmera"], [&"zoom", "Zoom"]]
+			[&"back", "Cancelar"]]
 	elif _state.current_state == BattleState.State.PLAYER_TURN:
 		hints = [[&"navigate", "Ação"], [&"confirm", "Usar"], [&"tabs", "Filtro"],
 			[&"end_turn", "Cancelar fim de turno" if _state.active_ended() else "Fim de turno"],
@@ -427,7 +440,7 @@ func _input(event: InputEvent) -> void:
 		BattleState.State.ATTACK_MODE:  _handle_attack_mode(event as InputEventKey)
 
 # ======================================================
-# INPUT — COMANDOS DO COMBATE (actions: X, Y/Tab, View, R3)
+# INPUT — COMANDOS DO COMBATE (actions: Y fim de turno, X/Tab examinar, View, R3 visão geral)
 # ======================================================
 # Eventos de joypad só valem com o controle já ativo: o botão que o "acorda" apenas
 # troca o dispositivo (a cena roda antes do autoload InputDevice).
@@ -435,7 +448,10 @@ func _handle_action_event(event: InputEvent) -> bool:
 	if event is InputEventJoypadButton and not InputDevice.is_gamepad():
 		return false
 	var act: StringName = &""
-	for a: StringName in [InputBindings.END_TURN, InputBindings.EXAMINE, InputBindings.LOG, InputBindings.ZOOM_CYCLE, InputBindings.SWITCH_HERO]:
+	var acts: Array = [InputBindings.END_TURN, InputBindings.EXAMINE, InputBindings.LOG, InputBindings.ZOOM_OVERVIEW,
+			InputBindings.SWITCH_HERO, InputBindings.SELECT_NEXT, InputBindings.SELECT_PREV]
+	acts.append_array(InputBindings.SELECT_POS)
+	for a: StringName in acts:
 		if event.is_action_pressed(a, false):
 			act = a
 			break
@@ -447,10 +463,14 @@ func _handle_action_event(event: InputEvent) -> bool:
 	match act:
 		InputBindings.LOG:
 			_toggle_log()
-		InputBindings.ZOOM_CYCLE:
-			_battle_area.cycle_zoom()
-		InputBindings.SWITCH_HERO:
+		InputBindings.ZOOM_OVERVIEW:
+			if not _reaction_pending:
+				_battle_area.toggle_overview()
+		InputBindings.SWITCH_HERO, InputBindings.SELECT_NEXT:
 			_switch_hero_to_next()
+		InputBindings.SELECT_PREV:
+			if _can_switch_hero() and _state.cycle_active_member(-1):
+				_refresh_ui()
 		InputBindings.END_TURN:
 			# Mesmos bloqueios do botão FIM: nada durante animação, reação ou exame.
 			if not _reaction_pending and _examine_focus == ExamineFocus.NONE \
@@ -463,6 +483,10 @@ func _handle_action_event(event: InputEvent) -> bool:
 					and _state.current_state == BattleState.State.PLAYER_TURN \
 					and _state.battle_result.is_empty():
 				_enter_examine()
+		_:
+			var pos: int = InputBindings.SELECT_POS.find(act)
+			if pos >= 0:
+				_select_party_position(pos)
 	return true
 
 func _toggle_log() -> void:
@@ -531,9 +555,9 @@ func _handle_examine_key(event: InputEventKey) -> void:
 	match _examine_focus:
 		ExamineFocus.BAR:
 			match event.keycode:
-				KEY_LEFT, KEY_A:
+				KEY_LEFT:
 					_examine_move(-1)
-				KEY_RIGHT, KEY_D:
+				KEY_RIGHT:
 					_examine_move(1)
 				KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 					_open_examine_menu()
@@ -549,9 +573,9 @@ func _handle_examine_key(event: InputEventKey) -> void:
 					_examine_focus = ExamineFocus.BAR
 		ExamineFocus.PANEL:
 			match event.keycode:
-				KEY_LEFT, KEY_A:
+				KEY_LEFT:
 					_examine_move(-1)
-				KEY_RIGHT, KEY_D:
+				KEY_RIGHT:
 					_examine_move(1)
 				KEY_ESCAPE:
 					_examine_panel.hide_panel()
@@ -571,10 +595,10 @@ func _handle_player_turn(event: InputEventKey) -> void:
 	# O cursor da HUD percorre as células VISÍVEIS do grid (ActionPanel); Q/E (LB/RB)
 	# trocam o filtro do grid, que é a "aba" da HUD atual.
 	match event.keycode:
-		KEY_UP, KEY_W:       _action_panel.nav_move(Vector2i(0, -1))
-		KEY_DOWN, KEY_S:     _action_panel.nav_move(Vector2i(0, 1))
-		KEY_LEFT, KEY_A:     _action_panel.nav_move(Vector2i(-1, 0))
-		KEY_RIGHT, KEY_D:    _action_panel.nav_move(Vector2i(1, 0))
+		KEY_UP:       _action_panel.nav_move(Vector2i(0, -1))
+		KEY_DOWN:     _action_panel.nav_move(Vector2i(0, 1))
+		KEY_LEFT:     _action_panel.nav_move(Vector2i(-1, 0))
+		KEY_RIGHT:    _action_panel.nav_move(Vector2i(1, 0))
 		KEY_Q:               _action_panel.cycle_filter(-1)
 		KEY_E:               _action_panel.cycle_filter(1)
 		KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6:
@@ -613,10 +637,10 @@ func _handle_player_turn(event: InputEventKey) -> void:
 # ======================================================
 func _handle_move_mode(event: InputEventKey) -> void:
 	match event.keycode:
-		KEY_UP, KEY_W:    _step_cursor(Vector2i( 0, -1)); return
-		KEY_DOWN, KEY_S:  _step_cursor(Vector2i( 0,  1)); return
-		KEY_LEFT, KEY_A:  _step_cursor(Vector2i(-1,  0)); return
-		KEY_RIGHT, KEY_D: _step_cursor(Vector2i( 1,  0)); return
+		KEY_UP:    _step_cursor(Vector2i( 0, -1)); return
+		KEY_DOWN:  _step_cursor(Vector2i( 0,  1)); return
+		KEY_LEFT:  _step_cursor(Vector2i(-1,  0)); return
+		KEY_RIGHT: _step_cursor(Vector2i( 1,  0)); return
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			_confirm_cursor()
 			return
@@ -630,10 +654,10 @@ func _handle_move_mode(event: InputEventKey) -> void:
 # andam de quadrado em quadrado; a validade só é cobrada ao confirmar.
 func _handle_attack_mode(event: InputEventKey) -> void:
 	match event.keycode:
-		KEY_UP, KEY_W:    _step_cursor(Vector2i( 0, -1)); return
-		KEY_DOWN, KEY_S:  _step_cursor(Vector2i( 0,  1)); return
-		KEY_LEFT, KEY_A:  _step_cursor(Vector2i(-1,  0)); return
-		KEY_RIGHT, KEY_D: _step_cursor(Vector2i( 1,  0)); return
+		KEY_UP:    _step_cursor(Vector2i( 0, -1)); return
+		KEY_DOWN:  _step_cursor(Vector2i( 0,  1)); return
+		KEY_LEFT:  _step_cursor(Vector2i(-1,  0)); return
+		KEY_RIGHT: _step_cursor(Vector2i( 1,  0)); return
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			_confirm_cursor()
 			return
@@ -676,10 +700,10 @@ func _handle_action_bar(event: InputEventKey) -> void:
 	match event.keycode:
 		KEY_ESCAPE:
 			_action_panel._on_cancel_action()
-		KEY_LEFT, KEY_A:
+		KEY_LEFT:
 			if _action_panel._confirm_btn.visible:
 				_action_panel._confirm_btn.grab_focus()
-		KEY_RIGHT, KEY_D:
+		KEY_RIGHT:
 			_action_panel._back_btn.grab_focus()
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			if _action_panel._back_btn.has_focus() or not _action_panel._confirm_btn.visible:
@@ -1332,6 +1356,16 @@ func _can_switch_hero() -> bool:
 		and _examine_focus == ExamineFocus.NONE and _state.battle_result.is_empty() \
 		and _is_neutral_player_state() and _state.switchable_members().size() > 1
 
+# F1-F4 (BG3 "Select Character at Position n"): o n-ésimo herói da party, se o turno permite trocar para ele.
+func _select_party_position(pos: int) -> void:
+	if pos < 0 or pos >= BattleState.PLAYERS.size():
+		return
+	var pname: String = BattleState.PLAYERS[pos]["name"]
+	for i in range(BattleState.TURN_QUEUE.size()):
+		if BattleState.TURN_QUEUE[i]["name"] == pname and BattleState.TURN_QUEUE[i]["is_player"]:
+			_switch_hero_to(i)
+			return
+
 func _switch_hero_to_next() -> void:
 	if _can_switch_hero() and _state.cycle_active_member(1):
 		_refresh_ui()
@@ -1509,8 +1543,17 @@ func _process(_dt: float) -> void:
 	_sync_examine_state()
 	_update_nav_tooltip()
 	_hint_bar.visible = not _pause_menu.visible and not _reaction_pending and _state.battle_result.is_empty()
+	_camera_hint_bar.visible = _hint_bar.visible
 	_action_panel.nav_enabled = not _pause_menu.visible and not _reaction_pending and _examine_focus == ExamineFocus.NONE
 	InputDevice.stick_drives_cursor = _stick_drives_cursor()
+	if _neutral_hover_shown and _state.current_state != BattleState.State.PLAYER_TURN:
+		_hide_neutral_hover()   # o painel do hover neutro não passa para a mira nem para o turno inimigo
+	# Zoom contínuo e foco automático param com pausa, reação ou resultado na tela.
+	_battle_area.camera_input_enabled = not _pause_menu.visible and not _reaction_pending \
+		and _state.battle_result.is_empty()
+	# Centralizar (LT / Home): borda de subida, vale mesmo durante a animação.
+	if _battle_area.camera_input_enabled and Input.is_action_just_pressed(InputBindings.CENTER_CAMERA):
+		center_camera_on_active()
 	var want: bool = InputDevice.is_los_held() and _is_neutral_player_state() and not _animating
 	if want != _los_overlay_on:
 		_los_overlay_on = want
@@ -1519,19 +1562,44 @@ func _process(_dt: float) -> void:
 func _exit_tree() -> void:
 	InputDevice.stick_drives_cursor = false
 
-# O analógico esquerdo move o cursor livre do grid só enquanto há um modo de grid ativo
-# e nada mais (animação, reação, pausa, exame, barra de confirmação) está no controle.
-func _stick_drives_cursor() -> bool:
-	return (_state.current_state == BattleState.State.MOVE_MODE \
-			or _state.current_state == BattleState.State.ATTACK_MODE) \
-		and not _animating and not _reaction_pending and not _pause_menu.visible \
-		and not _action_panel._action_bar_active and _examine_focus == ExamineFocus.NONE \
-		and _state.battle_result.is_empty()
+# Centraliza a câmera (suave) no combatente da vez.
+func center_camera_on_active() -> void:
+	var idx: int = _state.active_index
+	if idx >= 0 and idx < _state.combatant_positions.size():
+		_battle_area.center_on_tile(_state.combatant_positions[idx], true)
 
-# O hover (mouse ou analógico) move o cursor de quadrado de MOVE/ATTACK: o quadrado sob
-# o ponteiro é o selecionado, qualquer um, alcançável ou não.
+# Câmera de combate (BG3): o 1º enquadramento é sempre no combatente da vez; depois, ao mudar o
+# combatente ativo (turno de inimigo, troca de herói), vai até ele se não estiver visível e a opção
+# "Câmera dinâmica" estiver ligada. Só marca como feito quando a área já tem tamanho.
+var _camera_idx: int = -2   # -2 = ainda não enquadrou
+
+func _follow_active_camera() -> void:
+	var idx: int = _state.active_index
+	if idx == _camera_idx or _battle_area.size.x < 1.0 or _battle_area.size.y < 1.0 or idx < 0 or idx >= _state.combatant_positions.size():
+		return
+	var first: bool = _camera_idx == -2
+	_camera_idx = idx
+	var gp: Vector2i = _state.combatant_positions[idx]
+	if first:
+		_battle_area.center_on_tile(gp)
+	elif GameSettings.dynamic_camera_enabled:
+		_battle_area.focus_tile_if_hidden(gp)
+
+# BG3: o analógico esquerdo é o cursor livre do mundo (e leva a câmera à borda) durante TODO o
+# combate: turno neutro, movimento, mira, turno inimigo e animações. Só deixa de sê-lo quando um
+# painel modal precisa dele como navegação (pausa, reação, exame, resultado); aí ele volta a
+# virar setas. A barra de ações, o filtro e a barra Confirmar/Voltar são do D-pad.
+func _stick_drives_cursor() -> bool:
+	return not _reaction_pending and not _pause_menu.visible \
+		and _examine_focus == ExamineFocus.NONE and _state.battle_result.is_empty()
+
+# Hover (mouse ou cursor livre). Em MOVE/ATTACK o quadrado sob o ponteiro é o selecionado, qualquer
+# um, alcançável ou não. No turno neutro só olha: mostra o combatente sob o ponteiro, sem executar nada.
 func _on_tile_hovered(grid_pos: Vector2i) -> void:
 	if _state == null:
+		return
+	if _state.current_state == BattleState.State.PLAYER_TURN:
+		_show_neutral_hover(grid_pos)
 		return
 	if _state.current_state != BattleState.State.MOVE_MODE \
 			and _state.current_state != BattleState.State.ATTACK_MODE:
@@ -1539,6 +1607,21 @@ func _on_tile_hovered(grid_pos: Vector2i) -> void:
 	_state.set_cursor_tile(grid_pos)
 	_update_attack_outlines()
 	_battle_area.queue_redraw()
+
+var _neutral_hover_shown: bool = false
+
+func _show_neutral_hover(grid_pos: Vector2i) -> void:
+	for i in range(BattleState.TURN_QUEUE.size()):
+		if _state.combatant_positions[i] == grid_pos and not _state.dead_indices.has(i):
+			_enemy_info_panel.show_for(BattleState.TURN_QUEUE[i], _state.get_hp(i), maxi(1, _state.get_max_hp(i)))
+			_neutral_hover_shown = true
+			return
+	_hide_neutral_hover()
+
+func _hide_neutral_hover() -> void:
+	if _neutral_hover_shown:
+		_neutral_hover_shown = false
+		_enemy_info_panel.hide_panel()
 
 func _on_tile_clicked(grid_pos: Vector2i) -> void:
 	if _animating:
@@ -1642,8 +1725,8 @@ func _clear_pending_actions() -> void:
 	_pending_attack_slot_level = 0
 	_pending_attack_ki_cost = 0
 
-# Fim de turno e "cancelar fim de turno" usam o MESMO comando (BG3, bg3.wiki "Controls": Space; no
-# controle é o botão X do jogo, porque o Y daqui é Examinar): no herói que ainda age, encerra o turno
+# Fim de turno e "cancelar fim de turno" usam o MESMO comando (BG3, bg3.wiki "Controls": Space no teclado,
+# Y no controle): no herói que ainda age, encerra o turno
 # DELE; num herói que já encerrou (selecionado pelo retrato), cancela e ele volta a agir.
 func _end_or_cancel_turn() -> void:
 	if _state.active_ended():
@@ -1890,3 +1973,14 @@ func _on_examine_requested(slot_index: int) -> void:
 	_examine_focus = ExamineFocus.PANEL
 	_apply_examine_highlight()
 	_examine_panel.show_for(_state, slot_index)
+
+# Botão direito no mapa = Esc em MOVE/ATTACK (BG3 "Cancel Action": Esc ou botão direito).
+func _on_area_cancel_clicked() -> void:
+	if _animating or _reaction_pending or _pause_menu.visible or _examine_focus != ExamineFocus.NONE:
+		return
+	var esc := InputEventKey.new()
+	esc.keycode = KEY_ESCAPE
+	esc.pressed = true
+	match _state.current_state:
+		BattleState.State.MOVE_MODE:   _handle_move_mode(esc)
+		BattleState.State.ATTACK_MODE: _handle_attack_mode(esc)
